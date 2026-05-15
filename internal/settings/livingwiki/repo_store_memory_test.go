@@ -5,6 +5,7 @@ package livingwiki_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -255,6 +256,182 @@ func TestEffectiveEditPolicyFallback(t *testing.T) {
 	}
 	if got := sinkBST.EffectiveEditPolicy(); got != livingwiki.RepoWikiEditPolicyDirectPublish {
 		t.Errorf("fallback for BACKSTAGE_TECHDOCS: got %q, want DIRECT_PUBLISH", got)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CA-158: optimistic concurrency (version field)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestRepoSettingsMemStore_VersionIncrementsOnWrite verifies that each
+// successful write increments the version counter.
+func TestRepoSettingsMemStore_VersionIncrementsOnWrite(t *testing.T) {
+	store := livingwiki.NewRepoSettingsMemStore()
+	s := livingwiki.RepositoryLivingWikiSettings{
+		TenantID: testTenant,
+		RepoID:   "repo-version",
+		Enabled:  true,
+	}
+
+	if err := store.SetRepoSettings(context.Background(), s); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	got, _ := store.GetRepoSettings(context.Background(), testTenant, "repo-version")
+	if got.Version != 1 {
+		t.Errorf("after first write: version = %d, want 1", got.Version)
+	}
+
+	if err := store.SetRepoSettings(context.Background(), *got); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+	got2, _ := store.GetRepoSettings(context.Background(), testTenant, "repo-version")
+	if got2.Version != 2 {
+		t.Errorf("after second write: version = %d, want 2", got2.Version)
+	}
+}
+
+// TestRepoSettingsMemStore_SetIfVersion_SucceedsOnMatch verifies that
+// SetRepoSettingsIfVersion succeeds when the version matches.
+func TestRepoSettingsMemStore_SetIfVersion_SucceedsOnMatch(t *testing.T) {
+	store := livingwiki.NewRepoSettingsMemStore()
+	s := livingwiki.RepositoryLivingWikiSettings{
+		TenantID: testTenant,
+		RepoID:   "repo-cas",
+		Enabled:  false,
+	}
+
+	if err := store.SetRepoSettings(context.Background(), s); err != nil {
+		t.Fatalf("initial write: %v", err)
+	}
+	got, _ := store.GetRepoSettings(context.Background(), testTenant, "repo-cas")
+
+	got.Enabled = true
+	if err := store.SetRepoSettingsIfVersion(context.Background(), *got, got.Version); err != nil {
+		t.Fatalf("SetRepoSettingsIfVersion with matching version: %v", err)
+	}
+
+	result, _ := store.GetRepoSettings(context.Background(), testTenant, "repo-cas")
+	if !result.Enabled {
+		t.Error("expected Enabled=true after successful versioned write")
+	}
+	if result.Version != got.Version+1 {
+		t.Errorf("version should have incremented: got %d, want %d", result.Version, got.Version+1)
+	}
+}
+
+// TestRepoSettingsMemStore_SetIfVersion_ConflictOnMismatch verifies that
+// SetRepoSettingsIfVersion returns ErrLWikiSettingsVersionConflict when a
+// concurrent write has already incremented the version.
+func TestRepoSettingsMemStore_SetIfVersion_ConflictOnMismatch(t *testing.T) {
+	store := livingwiki.NewRepoSettingsMemStore()
+	s := livingwiki.RepositoryLivingWikiSettings{
+		TenantID: testTenant,
+		RepoID:   "repo-conflict",
+		Enabled:  false,
+	}
+	if err := store.SetRepoSettings(context.Background(), s); err != nil {
+		t.Fatalf("initial write: %v", err)
+	}
+	got, _ := store.GetRepoSettings(context.Background(), testTenant, "repo-conflict")
+	staleVersion := got.Version
+
+	// Concurrent write — advances the version.
+	got.Enabled = true
+	if err := store.SetRepoSettings(context.Background(), *got); err != nil {
+		t.Fatalf("concurrent write: %v", err)
+	}
+
+	// Now try to write with the old stale version — should conflict.
+	got.Mode = livingwiki.RepoWikiModePRReview
+	err := store.SetRepoSettingsIfVersion(context.Background(), *got, staleVersion)
+	if err == nil {
+		t.Fatal("expected ErrLWikiSettingsVersionConflict, got nil")
+	}
+	if !errors.Is(err, livingwiki.ErrLWikiSettingsVersionConflict) {
+		t.Errorf("expected ErrLWikiSettingsVersionConflict, got %v", err)
+	}
+}
+
+// TestRepoSettingsMemStore_SetIfVersion_ZeroIsUnconditional verifies that
+// expectedVersion==0 skips the version check (first-time enable path).
+func TestRepoSettingsMemStore_SetIfVersion_ZeroIsUnconditional(t *testing.T) {
+	store := livingwiki.NewRepoSettingsMemStore()
+	s := livingwiki.RepositoryLivingWikiSettings{
+		TenantID: testTenant,
+		RepoID:   "repo-zero-ver",
+		Enabled:  false,
+	}
+	if err := store.SetRepoSettings(context.Background(), s); err != nil {
+		t.Fatalf("initial write: %v", err)
+	}
+
+	// Write twice so version is now 2.
+	got, _ := store.GetRepoSettings(context.Background(), testTenant, "repo-zero-ver")
+	if err := store.SetRepoSettings(context.Background(), *got); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+
+	// Unconditional write with version=0 must succeed regardless.
+	s.Enabled = true
+	s.Version = 0
+	if err := store.SetRepoSettingsIfVersion(context.Background(), s, 0); err != nil {
+		t.Fatalf("unconditional write (version=0) should succeed: %v", err)
+	}
+}
+
+// TestRepoSettingsMemStore_ConcurrentEnables verifies that two concurrent
+// goroutines each calling SetRepoSettingsIfVersion with the same base version
+// results in exactly one success and one conflict (no lost write).
+func TestRepoSettingsMemStore_ConcurrentEnables(t *testing.T) {
+	store := livingwiki.NewRepoSettingsMemStore()
+	base := livingwiki.RepositoryLivingWikiSettings{
+		TenantID: testTenant,
+		RepoID:   "repo-concurrent",
+	}
+	if err := store.SetRepoSettings(context.Background(), base); err != nil {
+		t.Fatalf("initial write: %v", err)
+	}
+	snap, _ := store.GetRepoSettings(context.Background(), testTenant, "repo-concurrent")
+
+	// Both goroutines read the same version.
+	const goroutines = 5
+	errs := make([]error, goroutines)
+	done := make(chan struct{})
+
+	for i := range goroutines {
+		go func(idx int) {
+			defer func() { done <- struct{}{} }()
+			s := *snap
+			s.Enabled = true
+			errs[idx] = store.SetRepoSettingsIfVersion(context.Background(), s, snap.Version)
+		}(i)
+	}
+	for range goroutines {
+		<-done
+	}
+
+	successes := 0
+	conflicts := 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, livingwiki.ErrLWikiSettingsVersionConflict):
+			conflicts++
+		default:
+			t.Errorf("unexpected error: %v", err)
+		}
+	}
+	if successes == 0 {
+		t.Error("expected at least one goroutine to succeed")
+	}
+	if successes+conflicts != goroutines {
+		t.Errorf("successes(%d)+conflicts(%d) != %d", successes, conflicts, goroutines)
+	}
+	// The in-memory store is protected by a mutex, so exactly one goroutine
+	// succeeds (first writer wins); all others conflict.
+	if successes != 1 {
+		t.Errorf("expected exactly 1 success, got %d", successes)
 	}
 }
 

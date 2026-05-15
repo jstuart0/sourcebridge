@@ -40,6 +40,32 @@ func (m *RepoSettingsMemStore) GetRepoSettings(_ context.Context, tenantID, repo
 func (m *RepoSettingsMemStore) SetRepoSettings(_ context.Context, s RepositoryLivingWikiSettings) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	existing, exists := m.rows[repoKey{s.TenantID, s.RepoID}]
+	if exists {
+		s.Version = existing.Version + 1
+	} else {
+		s.Version = 1
+	}
+	m.rows[repoKey{s.TenantID, s.RepoID}] = s
+	return nil
+}
+
+// SetRepoSettingsIfVersion is the optimistic-concurrency variant (CA-158).
+// Returns ErrLWikiSettingsVersionConflict when the stored version no longer
+// matches expectedVersion.  expectedVersion==0 is treated as unconditional
+// (no prior row to compare against).
+func (m *RepoSettingsMemStore) SetRepoSettingsIfVersion(_ context.Context, s RepositoryLivingWikiSettings, expectedVersion int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	existing, exists := m.rows[repoKey{s.TenantID, s.RepoID}]
+	if expectedVersion != 0 && exists && existing.Version != expectedVersion {
+		return ErrLWikiSettingsVersionConflict
+	}
+	if exists {
+		s.Version = existing.Version + 1
+	} else {
+		s.Version = 1
+	}
 	m.rows[repoKey{s.TenantID, s.RepoID}] = s
 	return nil
 }

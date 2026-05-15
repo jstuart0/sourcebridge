@@ -89,11 +89,15 @@ def resolve_provider_for_context(
         # and whatever model the override carries.
         return fallback_llm if fallback_llm is not None else llm, override.model or None, None
 
-    # Per-request providers are created synchronously without gate wrapping.
-    # Gate wrapping is reserved for long-lived startup providers (plan Phase 2).
-    # The resolution_key we return lets callers (GetProviderCapabilities) look up
-    # the *gate* for this override's (provider, base_url) without re-wrapping.
-    # Lazy import avoids a circular dependency between servicer_utils ↔ config.
+    # CA-172: per-request providers are now wrapped through the gate registry
+    # when one is available.  ``ensure_gate_sync`` creates/retrieves the gate
+    # entry synchronously (safe — asyncio is single-threaded) and then
+    # ``ConcurrencyGatedProvider`` wraps the raw provider so every in-flight
+    # call from a workspace-overridden endpoint is counted in the admin
+    # activity snapshot.  Prior behaviour (no wrapping) meant in_flight and
+    # tokens_per_second were always 0 for per-request override providers.
+    #
+    # Lazy imports avoid circular imports between servicer_utils ↔ config.
     from workers.common.llm.config import _create_llm_provider_sync
 
     provider, model = _create_llm_provider_sync(
@@ -105,11 +109,32 @@ def resolve_provider_for_context(
         draft_model=override.draft_model,
         timeout_seconds=override.timeout_seconds,
     )
-    # Build the resolution key from the override's effective provider/base_url.
+
+    resolved_provider = override.provider or getattr(config, "llm_provider", "")
+    resolved_base_url = override.base_url or getattr(config, "llm_base_url", None) or None
+
     resolution_key: ProviderResolutionKey | None = None
     if gate_registry is not None:
-        resolved_provider = override.provider or getattr(config, "llm_provider", "")
-        resolved_base_url = override.base_url or getattr(config, "llm_base_url", None) or None
+        from workers.common.llm.concurrency import ConcurrencyGatedProvider  # noqa: PLC0415
+        from workers.common.llm.openai_compat import OpenAICompatProvider  # noqa: PLC0415
+
+        gate = gate_registry.ensure_gate_sync(resolved_provider, resolved_base_url, "llm")
+        cfg = gate_registry._config
+        if cfg.wrapper_enabled:
+            if isinstance(provider, OpenAICompatProvider):
+                from workers.common.llm.concurrency import OpenAICompatGatedProvider  # noqa: PLC0415
+                provider = OpenAICompatGatedProvider(provider, gate, cfg)
+            else:
+                try:
+                    from workers.common.llm.anthropic import AnthropicProvider  # noqa: PLC0415
+                    if isinstance(provider, AnthropicProvider):
+                        from workers.common.llm.concurrency import AnthropicGatedProvider  # noqa: PLC0415
+                        provider = AnthropicGatedProvider(provider, gate, cfg)
+                    else:
+                        provider = ConcurrencyGatedProvider(provider, gate, cfg)
+                except ImportError:
+                    provider = ConcurrencyGatedProvider(provider, gate, cfg)
+
         resolution_key = ProviderResolutionKey(
             provider=resolved_provider,
             base_url=resolved_base_url,

@@ -250,3 +250,140 @@ def test_knowledge_servicer_resolve_report_provider_with_report_llm():
     context = _MockContext()
     provider, model = svc._resolve_report_provider(context)
     assert provider is report_llm
+
+
+# ---------------------------------------------------------------------------
+# CA-172: per-request override providers appear in the gate snapshot
+# ---------------------------------------------------------------------------
+
+
+class _FullMockConfig(_MockConfig):
+    """Extended MockConfig with fields required by _create_llm_provider_sync."""
+
+    def __init__(
+        self,
+        *,
+        llm_provider: str = "openai",
+        llm_base_url: str = "http://localhost:11434",
+        llm_api_key: str = "test-key",
+        llm_model: str = "gpt-4",
+        llm_draft_model: str = "",
+        llm_timeout: int = 60,
+        llm_report_model: str = "",
+        test_mode: bool = True,
+        llm_allow_private_base_url: bool = True,
+    ) -> None:
+        super().__init__(
+            llm_provider=llm_provider,
+            llm_base_url=llm_base_url,
+            llm_api_key=llm_api_key,
+            llm_model=llm_model,
+            llm_draft_model=llm_draft_model,
+            llm_timeout=llm_timeout,
+            llm_report_model=llm_report_model,
+        )
+        self.test_mode = test_mode
+        self.llm_allow_private_base_url = llm_allow_private_base_url
+
+    def model_copy(self, *, update: dict) -> "_FullMockConfig":
+        """Override parent model_copy to preserve the extra fields."""
+        return _FullMockConfig(
+            llm_provider=update.get("llm_provider", self.llm_provider),
+            llm_base_url=update.get("llm_base_url", self.llm_base_url),
+            llm_api_key=update.get("llm_api_key", self.llm_api_key),
+            llm_model=update.get("llm_model", self.llm_model),
+            llm_draft_model=update.get("llm_draft_model", self.llm_draft_model),
+            llm_timeout=update.get("llm_timeout", self.llm_timeout),
+            llm_report_model=update.get("llm_report_model", self.llm_report_model),
+            test_mode=self.test_mode,
+            llm_allow_private_base_url=self.llm_allow_private_base_url,
+        )
+
+
+def test_per_request_override_provider_appears_in_gate_snapshot():
+    """CA-172: a per-request provider built via the full-override metadata path
+    must be wrapped through the gate registry so its in-flight counter appears
+    in the admin activity snapshot.
+
+    We verify that after calling resolve_provider_for_context with an
+    x-sb-llm-provider override and a gate_registry:
+      1. The returned provider is a ConcurrencyGatedProvider (not a raw FakeLLMProvider).
+      2. The gate registry's snapshot now includes an entry for the resolved
+         provider + base_url.
+    """
+    import asyncio
+
+    from workers.common.llm.concurrency import (
+        ConcurrencyConfig,
+        ConcurrencyGatedProvider,
+        ProviderGateRegistry,
+    )
+
+    async def _run() -> None:
+        cfg = ConcurrencyConfig(metrics_interval_seconds=9999.0)
+        registry = ProviderGateRegistry(cfg)
+        try:
+            default_llm = FakeLLMProvider()
+            config = _FullMockConfig(
+                llm_provider="ollama",
+                llm_base_url="http://localhost:11434/v1",
+                llm_model="qwen3:8b",
+                test_mode=True,
+                llm_allow_private_base_url=True,
+            )
+            context = _MockContext({
+                "x-sb-llm-provider": "ollama",
+                "x-sb-llm-base-url": "http://192.168.10.108:11434/v1",
+                "x-sb-model": "qwen3:8b",
+            })
+
+            provider, model, resolution_key = resolve_provider_for_context(
+                default_llm, config, context, gate_registry=registry
+            )
+
+            # The provider must be gate-wrapped (CA-172 contract).
+            assert isinstance(provider, ConcurrencyGatedProvider), (
+                f"Expected ConcurrencyGatedProvider, got {type(provider).__name__}"
+            )
+
+            # The gate snapshot must include the override endpoint.
+            snapshot = registry.snapshot()
+            assert len(snapshot) > 0, "gate snapshot should be non-empty after per-request override"
+            providers_in_snapshot = {e.provider for e in snapshot}
+            assert "ollama" in providers_in_snapshot, (
+                f"'ollama' not in gate snapshot providers: {providers_in_snapshot}"
+            )
+        finally:
+            await registry.close()
+
+    asyncio.run(_run())
+
+
+def test_per_request_override_without_registry_returns_raw_provider():
+    """CA-172: when gate_registry is None the override path returns the raw
+    provider unchanged (backward-compat / kill-switch-off path).
+    """
+    from workers.common.llm.concurrency import ConcurrencyGatedProvider
+
+    default_llm = FakeLLMProvider()
+    config = _FullMockConfig(
+        llm_provider="ollama",
+        llm_base_url="http://localhost:11434/v1",
+        llm_model="qwen3:8b",
+        test_mode=True,
+        llm_allow_private_base_url=True,
+    )
+    context = _MockContext({
+        "x-sb-llm-provider": "ollama",
+        "x-sb-model": "qwen3:8b",
+    })
+
+    provider, model, resolution_key = resolve_provider_for_context(
+        default_llm, config, context
+    )
+
+    # Without a registry, no wrapping should occur.
+    assert not isinstance(provider, ConcurrencyGatedProvider), (
+        "provider should NOT be gate-wrapped when gate_registry=None"
+    )
+    assert resolution_key is None

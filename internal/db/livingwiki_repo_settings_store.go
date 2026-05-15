@@ -111,6 +111,10 @@ type surrealLivingWikiRepoSettings struct {
 	RepoID           string           `json:"repo_id"`
 	Enabled          bool             `json:"enabled"`
 	Mode             string           `json:"mode"`
+	// Version is the optimistic-concurrency counter (CA-158). Incremented
+	// by every write. Zero on pre-059 rows that lack the column; treated as
+	// "unconditional" by SetRepoSettingsIfVersion.
+	Version          int              `json:"version"`
 	// SurrealDB stores these as native arrays (TYPE array). The struct
 	// reflects the on-the-wire shape: a slice of typed records and a slice
 	// of strings respectively. An earlier version stored them as JSON-encoded
@@ -204,6 +208,7 @@ func (r *surrealLivingWikiRepoSettings) toSettings(decryptAPIKey func(string) (s
 		MaxPagesPerJob:    r.MaxPagesPerJob,
 		UpdatedAt:         r.UpdatedAt.Time,
 		UpdatedBy:         r.UpdatedBy,
+		Version:           r.Version,
 	}
 	if s.MaxPagesPerJob == 0 {
 		s.MaxPagesPerJob = 50
@@ -494,12 +499,162 @@ func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, setting
 			max_pages_per_job            = $max_pages_per_job,
 			living_wiki_overview_enabled = $living_wiki_overview_enabled,
 			living_wiki_detailed_enabled = $living_wiki_detailed_enabled,
+			version                      = IF version THEN version + 1 ELSE 1 END,
 			` + dateClauses + llmOverrideClause + `
 			updated_by                   = $updated_by,
 			updated_at                   = time::now()
 	`
 	_, err := surrealdb.Query[interface{}](c, db, sql, vars)
 	return err
+}
+
+// SetRepoSettingsIfVersion is the optimistic-concurrency variant of
+// SetRepoSettings (CA-158). It writes the settings only when the row's
+// current version matches expectedVersion.  On version mismatch the method
+// returns ErrLWikiSettingsVersionConflict.
+//
+// expectedVersion == 0 is treated as an unconditional write (first-time
+// enable where there is no prior row to compare against).
+func (s *LivingWikiRepoSettingsStore) SetRepoSettingsIfVersion(c context.Context, settings livingwiki.RepositoryLivingWikiSettings, expectedVersion int) error {
+	if expectedVersion == 0 {
+		return s.SetRepoSettings(c, settings)
+	}
+
+	db := s.client.DB()
+	if db == nil {
+		return fmt.Errorf("database not connected")
+	}
+
+	if settings.MaxPagesPerJob == 0 {
+		settings.MaxPagesPerJob = 50
+	}
+	if string(settings.StaleWhenStrategy) == "" {
+		settings.StaleWhenStrategy = livingwiki.StaleStrategyDirect
+	}
+	if string(settings.Mode) == "" {
+		settings.Mode = livingwiki.RepoWikiModePRReview
+	}
+
+	rawSinks := make([]surrealRepoWikiSink, 0, len(settings.Sinks))
+	for _, sink := range settings.Sinks {
+		rawSinks = append(rawSinks, surrealRepoWikiSink{
+			Kind:            string(sink.Kind),
+			IntegrationName: sink.IntegrationName,
+			Audience:        string(sink.Audience),
+			EditPolicy:      string(sink.EditPolicy),
+		})
+	}
+	excludePaths := settings.ExcludePaths
+	if excludePaths == nil {
+		excludePaths = []string{}
+	}
+
+	vars := map[string]any{
+		"tenant_id":           settings.TenantID,
+		"repo_id":             settings.RepoID,
+		"enabled":             settings.Enabled,
+		"mode":                string(settings.Mode),
+		"sinks":               rawSinks,
+		"exclude_paths":       excludePaths,
+		"stale_when_strategy": string(settings.StaleWhenStrategy),
+		"max_pages_per_job":   settings.MaxPagesPerJob,
+		"updated_by":          settings.UpdatedBy,
+		"expected_version":    expectedVersion,
+	}
+
+	llmOverrideClause := ""
+	if settings.LLMOverride != nil && !settings.LLMOverride.IsEmpty() {
+		cipher, err := s.encryptOverrideAPIKey(settings.LLMOverride.APIKey)
+		if err != nil {
+			return fmt.Errorf("living-wiki repo override api key encrypt: %w", err)
+		}
+		vars["llm_override_profile_id"] = settings.LLMOverride.ProfileID
+		vars["llm_override_provider"] = settings.LLMOverride.Provider
+		vars["llm_override_base_url"] = settings.LLMOverride.BaseURL
+		vars["llm_override_api_key_cipher"] = cipher
+		vars["llm_override_advanced_mode"] = settings.LLMOverride.AdvancedMode
+		vars["llm_override_summary_model"] = settings.LLMOverride.SummaryModel
+		vars["llm_override_review_model"] = settings.LLMOverride.ReviewModel
+		vars["llm_override_ask_model"] = settings.LLMOverride.AskModel
+		vars["llm_override_knowledge_model"] = settings.LLMOverride.KnowledgeModel
+		vars["llm_override_architecture_diagram_model"] = settings.LLMOverride.ArchitectureDiagramModel
+		vars["llm_override_report_model"] = settings.LLMOverride.ReportModel
+		vars["llm_override_draft_model"] = settings.LLMOverride.DraftModel
+		vars["llm_override_legacy_model"] = settings.LLMOverride.SummaryModel
+		llmOverrideClause = `living_wiki_llm_override = {
+			profile_id:                 $llm_override_profile_id,
+			provider:                   $llm_override_provider,
+			base_url:                   $llm_override_base_url,
+			api_key_cipher:             $llm_override_api_key_cipher,
+			model:                      $llm_override_legacy_model,
+			advanced_mode:              $llm_override_advanced_mode,
+			summary_model:              $llm_override_summary_model,
+			review_model:               $llm_override_review_model,
+			ask_model:                  $llm_override_ask_model,
+			knowledge_model:            $llm_override_knowledge_model,
+			architecture_diagram_model: $llm_override_architecture_diagram_model,
+			report_model:               $llm_override_report_model,
+			draft_model:                $llm_override_draft_model,
+			updated_at:                 time::now(),
+			updated_by:                 $updated_by,
+		},
+		`
+	} else {
+		llmOverrideClause = "living_wiki_llm_override = NONE,\n\t\t\t"
+	}
+
+	dateClauses := ""
+	if settings.LastRunAt != nil {
+		vars["last_run_at"] = settings.LastRunAt.UTC().Format(time.RFC3339Nano)
+		dateClauses += "last_run_at = type::datetime($last_run_at),\n\t\t\t"
+	}
+	if settings.DisabledAt != nil {
+		vars["disabled_at"] = settings.DisabledAt.UTC().Format(time.RFC3339Nano)
+		dateClauses += "disabled_at = type::datetime($disabled_at),\n\t\t\t"
+	}
+
+	vars["living_wiki_overview_enabled"] = settings.LivingWikiOverviewEnabled
+	vars["living_wiki_detailed_enabled"] = settings.LivingWikiDetailedEnabled
+
+	// UPDATE (not UPSERT) so the WHERE version = $expected_version guard is
+	// honoured. UPSERT ignores WHERE on the insert path.
+	sql := `
+		UPDATE type::thing('lw_repo_settings', [$tenant_id, $repo_id]) SET
+			tenant_id                    = $tenant_id,
+			repo_id                      = $repo_id,
+			enabled                      = $enabled,
+			mode                         = $mode,
+			sinks                        = $sinks,
+			exclude_paths                = $exclude_paths,
+			stale_when_strategy          = $stale_when_strategy,
+			max_pages_per_job            = $max_pages_per_job,
+			living_wiki_overview_enabled = $living_wiki_overview_enabled,
+			living_wiki_detailed_enabled = $living_wiki_detailed_enabled,
+			version                      = version + 1,
+			` + dateClauses + llmOverrideClause + `
+			updated_by                   = $updated_by,
+			updated_at                   = time::now()
+		WHERE version = $expected_version
+	`
+
+	// Query returns the updated rows.  If the WHERE version guard filtered
+	// out the row (concurrent write), the result is an empty array.
+	results, err := surrealdb.Query[[]surrealLivingWikiRepoSettings](c, db, sql, vars)
+	if err != nil {
+		return err
+	}
+	if results == nil || len(*results) == 0 {
+		return livingwiki.ErrLWikiSettingsVersionConflict
+	}
+	qr := (*results)[0]
+	if qr.Error != nil {
+		return qr.Error
+	}
+	if len(qr.Result) == 0 {
+		// WHERE version = $expected_version matched nothing — concurrent write.
+		return livingwiki.ErrLWikiSettingsVersionConflict
+	}
+	return nil
 }
 
 func (s *LivingWikiRepoSettingsStore) ListEnabledRepos(c context.Context, tenantID string) ([]livingwiki.RepositoryLivingWikiSettings, error) {

@@ -185,6 +185,19 @@ type RepositoryLivingWikiSettings struct {
 	// Default for new repos: false. Existing repos are backfilled to true by
 	// migration 051 to preserve today's per-folder pages (J1).
 	LivingWikiDetailedEnabled bool `json:"living_wiki_detailed_enabled"`
+
+	// Version is an optimistic-concurrency counter incremented by the
+	// database on every write (CA-158). Callers that perform a
+	// read-modify-write MUST pass the version they read back in to
+	// SetRepoSettingsIfVersion so a concurrent write is detected before
+	// the second write commits.
+	//
+	// Zero (the Go zero value) means "no version information" — used on
+	// the initial create path (first-time enable) where there is no
+	// prior row to read a version from. SetRepoSettingsIfVersion treats
+	// version=0 as "unconditional write" so the first enable always
+	// succeeds.
+	Version int `json:"version"`
 }
 
 // RepoWikiMode is the publish mode for a living-wiki repo.

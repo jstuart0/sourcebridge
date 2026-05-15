@@ -26,6 +26,7 @@ package graphql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -310,15 +311,56 @@ type noticeOnlyError struct{ notice string }
 
 func (e *noticeOnlyError) Error() string { return e.notice }
 
-// persistLivingWikiSettings writes the settings row to the store.
-// Returns a wrapped error on failure.
+// persistLivingWikiSettings writes the settings row to the store using
+// optimistic concurrency (CA-158).
 //
-// TODO(CA-XXX): RMW race documented at original schema.resolvers.go:2568-2572
-// — fixing requires CAS/optimistic locking on the settings store; deferred
-// to follow-up campaign.
+// The write is guarded by the version field read in the preceding
+// GetRepoSettings call (settings.Version).  If a concurrent caller has
+// written the row between our read and our write, SetRepoSettingsIfVersion
+// returns ErrLWikiSettingsVersionConflict.  In that case we perform a
+// single automatic retry: re-read the current row, re-merge our intent
+// on top of it, and attempt the versioned write once more.  On the second
+// conflict we surface the error to the caller rather than looping.
+//
+// The merge-on-retry uses only the fields we intended to change (Enabled,
+// Mode, Sinks, DisabledAt, etc.); fields controlled exclusively by other
+// mutations (e.g. LivingWikiOverviewEnabled owned by setLivingWikiModeFlags)
+// are preserved from the freshly-read row.
 func persistLivingWikiSettings(ctx context.Context, store livingwiki.RepoSettingsStore, settings livingwiki.RepositoryLivingWikiSettings) error {
-	if err := store.SetRepoSettings(ctx, settings); err != nil {
+	err := store.SetRepoSettingsIfVersion(ctx, settings, settings.Version)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, livingwiki.ErrLWikiSettingsVersionConflict) {
 		return fmt.Errorf("persist repo settings: %w", err)
+	}
+
+	// Conflict: re-read and retry once.
+	fresh, readErr := store.GetRepoSettings(ctx, settings.TenantID, settings.RepoID)
+	if readErr != nil {
+		return fmt.Errorf("persist repo settings (retry read): %w", readErr)
+	}
+	if fresh == nil {
+		// Row was deleted between our read and retry — fall back to unconditional write.
+		settings.Version = 0
+	} else {
+		// Preserve fields owned by other mutations; overwrite only the fields
+		// we set in EnableLivingWikiForRepo.
+		retrySettings := *fresh
+		retrySettings.Enabled = settings.Enabled
+		retrySettings.Mode = settings.Mode
+		retrySettings.Sinks = settings.Sinks
+		retrySettings.DisabledAt = settings.DisabledAt
+		retrySettings.UpdatedAt = settings.UpdatedAt
+		retrySettings.UpdatedBy = settings.UpdatedBy
+		// StaleWhenStrategy and MaxPagesPerJob are also set by this path.
+		retrySettings.StaleWhenStrategy = settings.StaleWhenStrategy
+		retrySettings.MaxPagesPerJob = settings.MaxPagesPerJob
+		settings = retrySettings
+	}
+
+	if retryErr := store.SetRepoSettingsIfVersion(ctx, settings, settings.Version); retryErr != nil {
+		return fmt.Errorf("persist repo settings (after conflict retry): %w", retryErr)
 	}
 	return nil
 }

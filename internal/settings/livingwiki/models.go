@@ -20,6 +20,13 @@ import (
 // sentinel — callers should match via errors.Is.
 var ErrEncryptionKeyRequired = errors.New("livingwiki: api key cannot be saved without an encryption key")
 
+// ErrLWikiSettingsVersionConflict is returned by
+// RepoSettingsStore.SetRepoSettingsIfVersion when the record's version
+// field no longer matches the expected value at write time — indicating
+// that a concurrent mutation has already updated the row.  The caller
+// should re-read the current settings and retry.
+var ErrLWikiSettingsVersionConflict = errors.New("livingwiki: settings version conflict — row was modified concurrently")
+
 // Settings holds the living-wiki configuration as stored in the DB (via the
 // admin UI). Zero/empty values mean "not configured by UI; use env-var or
 // built-in default".
@@ -149,6 +156,18 @@ type RepoSettingsStore interface {
 	// SetRepoSettings persists s. Creates or replaces the row identified by
 	// (TenantID, RepoID).
 	SetRepoSettings(ctx context.Context, s RepositoryLivingWikiSettings) error
+
+	// SetRepoSettingsIfVersion is the optimistic-concurrency variant of
+	// SetRepoSettings (CA-158).  It writes s only when the stored row's
+	// version equals expectedVersion.  When the row has been updated by a
+	// concurrent caller (version mismatch), it returns
+	// ErrLWikiSettingsVersionConflict.  Callers that receive that sentinel
+	// MUST re-read the current row and retry.
+	//
+	// expectedVersion == 0 is treated as an unconditional write (the caller
+	// has no prior row to compare against — e.g. first-time enable of a repo
+	// that has never been configured).
+	SetRepoSettingsIfVersion(ctx context.Context, s RepositoryLivingWikiSettings, expectedVersion int) error
 
 	// ListEnabledRepos returns all repos with enabled=true for the given
 	// tenant. Used by R6's scheduler tick.

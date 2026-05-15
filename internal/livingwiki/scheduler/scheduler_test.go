@@ -61,6 +61,10 @@ func (f *fakeRepoStore) SetRepoSettings(_ context.Context, _ livingwiki.Reposito
 	return nil
 }
 
+func (f *fakeRepoStore) SetRepoSettingsIfVersion(_ context.Context, s livingwiki.RepositoryLivingWikiSettings, _ int) error {
+	return nil
+}
+
 func (f *fakeRepoStore) DeleteRepoSettings(_ context.Context, _, _ string) error { return nil }
 
 func (f *fakeRepoStore) RepositoriesUsingSink(_ context.Context, _, _ string) ([]livingwiki.RepositoryLivingWikiSettings, error) {

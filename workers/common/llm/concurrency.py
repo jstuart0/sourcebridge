@@ -795,6 +795,55 @@ class ProviderGateRegistry:
                     tokens_per_second_60s=round(entry.tokens_per_second, 2),
                 )
 
+    def ensure_gate_sync(self, provider: str, base_url: str | None, kind: str) -> "ProviderGate":
+        """Return (or create) the gate for ``(provider, base_url, kind)`` synchronously.
+
+        CA-172: called from ``resolve_provider_for_context`` for per-request
+        override providers so they are counted in the admin activity snapshot.
+
+        Asyncio is cooperative and single-threaded, so plain dict reads and
+        writes here are race-free — the event loop cannot preempt a synchronous
+        call.  This bypasses the async ``asyncio.Lock`` used by ``lookup``; gate
+        objects created here are visible to concurrent async calls that go
+        through ``lookup`` because both paths share the same underlying dicts.
+
+        Raises ``RuntimeError`` when the registry has been closed.
+        """
+        if self._closed:
+            raise RuntimeError("ProviderGateRegistry has been closed; cannot look up gates")
+
+        mode = self._classify(provider)
+        if mode == "host":
+            _, normalized_origin = _normalize_host_key(provider, base_url)
+            host_key = (provider, normalized_origin)
+            counter_key = (provider, normalized_origin, kind)
+            if host_key not in self._host_gates:
+                cap = self._max_concurrent_for(provider, "llm")
+                self._host_gates[host_key] = _HostGate(max_concurrent=cap)
+            if counter_key not in self._kind_counters:
+                self._kind_counters[counter_key] = _KindCounter()
+            return ProviderGate(
+                self._host_gates[host_key],
+                self._kind_counters[counter_key],
+                provider,
+                normalized_origin,
+                kind,
+            )
+        else:
+            raw_url = base_url or ""
+            kind_key = (provider, raw_url, kind)
+            _, normalized_origin = _normalize_host_key(provider, base_url)
+            if kind_key not in self._kind_gates:
+                cap = self._max_concurrent_for(provider, kind)
+                self._kind_gates[kind_key] = _KindGate(max_concurrent=cap)
+            return ProviderGate(
+                self._kind_gates[kind_key],
+                None,
+                provider,
+                normalized_origin,
+                kind,
+            )
+
     async def close(self) -> None:
         """Cancel the aggregator task and mark the registry closed.
 
