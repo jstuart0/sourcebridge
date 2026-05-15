@@ -151,7 +151,15 @@ type Mutation {
   # which carries the legacy string-array references wire shape.
   ask(input: AskInput!): AskResult!
   autoLinkRequirements(repositoryId: ID!, minConfidence: Float): AutoLinkResult!
-  enrichRequirement(requirementId: ID!): Requirement!
+  enrichRequirement(requirementId: ID!, force: Boolean): Requirement!
+  """
+  Bulk-enrich all unenriched requirements in a repository.
+  Processes requirements in batches (default 10) via the existing orchestrator
+  so progress is visible on the admin Monitor page.
+  Returns a jobId the UI can use to track progress via the activity feed.
+  Set force=true to re-enrich requirements that already have tags/priority.
+  """
+  enrichAllRequirements(repositoryId: ID!, force: Boolean, batchSize: Int): EnrichAllRequirementsResult!
 
   # Change simulation
   simulateChange(input: SimulateChangeInput!): SimulatedImpactReport!
@@ -736,6 +744,17 @@ type ExplainSystemResult {
   model: String
   inputTokens: Int
   outputTokens: Int
+  """
+  Symbol, file, and requirement references drawn from the evidence the worker
+  cited when generating the explanation. Empty when the worker returned no
+  evidence (e.g. fast/summary depth). Mirrors the AskResult.references shape.
+  """
+  references: [AskReference!]!
+  """
+  IDs of requirements that are contextually related to the explanation.
+  Drawn from requirement-type evidence items in the worker response.
+  """
+  relatedRequirements: [String!]!
 }
 
 type ExecutionEntryPoint {
@@ -971,6 +990,16 @@ type AutoLinkResult {
   linksCreated: Int!
   requirementsProcessed: Int!
   links: [RequirementLink!]!
+}
+
+"""
+Result of the enrichAllRequirements bulk mutation.
+The jobId is visible on the admin Monitor page and can be used to poll progress
+via the existing LLM activity feed.
+"""
+type EnrichAllRequirementsResult {
+  jobId: String!
+  requirementsQueued: Int!
 }
 
 type SearchResult {

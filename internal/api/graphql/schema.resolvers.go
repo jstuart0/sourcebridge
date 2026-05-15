@@ -1069,7 +1069,11 @@ func (r *mutationResolver) AutoLinkRequirements(ctx context.Context, repositoryI
 }
 
 // EnrichRequirement is the resolver for the enrichRequirement field.
-func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID string) (*Requirement, error) {
+//
+// CA-88: merges tags via SET UNION and preserves user-set priority unless
+// force=true. When force=true the LLM suggestions replace existing values
+// (restores the old overwrite behavior for operator re-baselining).
+func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID string, force *bool) (*Requirement, error) {
 	if r.Deps.Worker == nil {
 		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
 	}
@@ -1078,6 +1082,8 @@ func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID 
 	if req == nil {
 		return nil, fmt.Errorf("requirement not found: %s", requirementID)
 	}
+
+	forceReplace := force != nil && *force
 
 	var resp *requirementsv1.EnrichRequirementResponse
 	err := r.runSyncLLMJob(ctx, llm.SubsystemRequirements, "enrich_requirement",
@@ -1106,24 +1112,22 @@ func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID 
 		return nil, fmt.Errorf("worker enrich failed: %w", err)
 	}
 
-	// Persist the enrichment results
-	newPriority := req.Priority
-	if resp.SuggestedPriority != "" {
-		newPriority = resp.SuggestedPriority
-	}
+	// Tags: SET UNION (existing + suggested) unless force=true (replace).
 	newTags := req.Tags
 	if len(resp.SuggestedTags) > 0 {
-		// Merge suggested tags with existing ones
-		tagSet := make(map[string]bool)
-		for _, t := range req.Tags {
-			tagSet[t] = true
+		if forceReplace {
+			newTags = resp.SuggestedTags
+		} else {
+			newTags = mergeUniqueStrings(req.Tags, resp.SuggestedTags)
 		}
-		for _, t := range resp.SuggestedTags {
-			tagSet[t] = true
-		}
-		newTags = make([]string, 0, len(tagSet))
-		for t := range tagSet {
-			newTags = append(newTags, t)
+	}
+
+	// Priority: only update when force=true OR the current value is unset.
+	// This preserves deliberate user edits while still populating an empty field.
+	newPriority := req.Priority
+	if resp.SuggestedPriority != "" {
+		if forceReplace || req.Priority == "" || req.Priority == "unset" {
+			newPriority = resp.SuggestedPriority
 		}
 	}
 
@@ -1135,6 +1139,140 @@ func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID 
 		return nil, fmt.Errorf("failed to update requirement: %s", requirementID)
 	}
 	return mapRequirement(updated), nil
+}
+
+// EnrichAllRequirements is the resolver for the enrichAllRequirements field.
+//
+// CA-89: bulk-enriches all unenriched requirements in a repository in batches.
+// Returns a jobId the caller can use to track progress via the admin Monitor feed.
+// Requirements with existing tags/priority are skipped unless force=true.
+func (r *mutationResolver) EnrichAllRequirements(ctx context.Context, repositoryID string, force *bool, batchSize *int) (*EnrichAllRequirementsResult, error) {
+	if r.Deps.Worker == nil {
+		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
+	}
+	if r.Deps.Orchestrator == nil {
+		return nil, fmt.Errorf("orchestrator not available")
+	}
+
+	repo := r.getStore(ctx).GetRepository(ctx, repositoryID)
+	if repo == nil {
+		return nil, fmt.Errorf("repository not found: %s", repositoryID)
+	}
+
+	forceReplace := force != nil && *force
+
+	batch := 10
+	if batchSize != nil && *batchSize > 0 {
+		batch = *batchSize
+	}
+	if batch > 100 {
+		batch = 100
+	}
+
+	// Load all requirements; filter to unenriched unless force=true.
+	allReqs, _ := r.getStore(ctx).GetRequirements(ctx, repositoryID, 10000, 0)
+	var toEnrich []*graphstore.StoredRequirement
+	for _, req := range allReqs {
+		if forceReplace || (len(req.Tags) == 0 && (req.Priority == "" || req.Priority == "unset")) {
+			toEnrich = append(toEnrich, req)
+		}
+	}
+
+	if len(toEnrich) == 0 {
+		// Nothing to do — return a synthetic "empty job" rather than failing.
+		// The caller can distinguish this via requirementsQueued=0.
+		return &EnrichAllRequirementsResult{JobID: "none", RequirementsQueued: 0}, nil
+	}
+
+	queued := len(toEnrich)
+	batchCopy := batch
+	reqsCopy := make([]*graphstore.StoredRequirement, len(toEnrich))
+	copy(reqsCopy, toEnrich)
+
+	llmProvider := r.resolveLLMProviderForOp(ctx, repositoryID, resolution.OpRequirementsEnrich)
+	req := &llm.EnqueueRequest{
+		Subsystem:   llm.SubsystemRequirements,
+		JobType:     "enrich_all_requirements",
+		TargetKey:   fmt.Sprintf("requirements:enrich_all:%s", repositoryID),
+		RepoID:      repositoryID,
+		LLMProvider: llmProvider,
+		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
+			total := len(reqsCopy)
+			for i := 0; i < total; i += batchCopy {
+				end := i + batchCopy
+				if end > total {
+					end = total
+				}
+				batch := reqsCopy[i:end]
+				for _, req := range batch {
+					var resp *requirementsv1.EnrichRequirementResponse
+					callErr := r.runSyncLLMJob(runCtx, llm.SubsystemRequirements, "enrich_requirement",
+						fmt.Sprintf("requirements:enrich:%s", req.ID), repositoryID,
+						func(innerRt llm.Runtime) error {
+							var err error
+							resp, err = r.Deps.LLMCaller.EnrichRequirement(runCtx, repositoryID, resolution.OpRequirementsEnrich, &requirementsv1.EnrichRequirementRequest{
+								Requirement: &commonv1.Requirement{
+									Id:          req.ID,
+									ExternalId:  req.ExternalID,
+									Title:       req.Title,
+									Description: req.Description,
+									Priority:    req.Priority,
+									Tags:        req.Tags,
+								},
+							})
+							if err != nil {
+								return err
+							}
+							if resp.Usage != nil {
+								innerRt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
+							}
+							return nil
+						})
+					if callErr != nil {
+						slog.Warn("enrich_all_requirements: single enrich failed",
+							"repo_id", repositoryID,
+							"requirement_id", req.ID,
+							"error", callErr)
+						continue
+					}
+
+					newTags := req.Tags
+					if len(resp.SuggestedTags) > 0 {
+						if forceReplace {
+							newTags = resp.SuggestedTags
+						} else {
+							newTags = mergeUniqueStrings(req.Tags, resp.SuggestedTags)
+						}
+					}
+					newPriority := req.Priority
+					if resp.SuggestedPriority != "" {
+						if forceReplace || req.Priority == "" || req.Priority == "unset" {
+							newPriority = resp.SuggestedPriority
+						}
+					}
+					r.getStore(runCtx).UpdateRequirementFields(runCtx, req.ID, graphstore.RequirementUpdate{
+						Priority: &newPriority,
+						Tags:     &newTags,
+					})
+				}
+				progress := float64(end) / float64(total)
+				rt.ReportProgress(progress, "enriching",
+					fmt.Sprintf("Enriched %d of %d requirements", end, total), 0)
+			}
+			rt.ReportProgress(1.0, "complete", fmt.Sprintf("Enriched %d requirements", total), 0)
+			return nil
+		},
+	}
+
+	job, err := r.Deps.Orchestrator.Enqueue(req)
+	if err != nil {
+		return nil, fmt.Errorf("enqueue bulk enrich failed: %w", err)
+	}
+
+	return &EnrichAllRequirementsResult{
+		JobID:              job.ID,
+		RequirementsQueued: queued,
+	}, nil
 }
 
 // SimulateChange is the resolver for the simulateChange field.
@@ -1684,7 +1822,9 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 	}
 
 	result := &ExplainSystemResult{
-		Explanation: resp.Explanation,
+		Explanation:         resp.Explanation,
+		References:          explainEvidenceToReferences(r.getStore(ctx), ctx, resp.Evidence),
+		RelatedRequirements: explainEvidenceToRequirementIDs(resp.Evidence),
 	}
 	if resp.Usage != nil {
 		model := resp.Usage.Model
@@ -4181,6 +4321,7 @@ func (r *queryResolver) RepositoriesUsingSink(ctx context.Context, integrationNa
 	return out, nil
 }
 
+
 // Files is the resolver for the files field.
 func (r *repositoryResolver) Files(ctx context.Context, obj *Repository, limit *int, offset *int, path *string) (*FileConnection, error) {
 	store := r.getStore(ctx)
@@ -4361,3 +4502,182 @@ type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type repositoryResolver struct{ *Resolver }
 type repositoryLivingWikiSettingsResolver struct{ *Resolver }
+
+// !!! WARNING !!!
+// The code below was going to be deleted when updating resolvers. It has been copied here so you have
+// one last chance to move it out of harms way if you want. There are two reasons this happens:
+//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
+//    it when you're done.
+//  - You have helper methods in this file. Move them out to keep these resolver files clean.
+/*
+	func (r *queryResolver) PreviewLivingWikiPlan(ctx context.Context, repositoryID string, mode *LivingWikiBuildMode, pageCountOverride *int) (*LivingWikiPlan, error) {
+	// ── 1. Kill-switch + global-disabled gate ────────────────────────────────
+	//
+	// Check before any heavy work. Returns a notice-bearing plan (not an error)
+	// so the UI can render the degraded banner rather than a generic error toast.
+	killSwitch := r.Deps.Flags.LivingWikiKillSwitch
+	globalEnabled := r.isLivingWikiGloballyEnabled()
+
+	if killSwitch || !globalEnabled {
+		var notice string
+		if killSwitch {
+			notice = "Living wiki is paused via SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH. Settings are saved but no jobs will run until the kill-switch is unset."
+		} else {
+			notice = "Living Wiki is not enabled globally. Enable it in the global settings panel, then jobs will start automatically."
+		}
+		return &LivingWikiPlan{
+			PlanSignature: "",
+			Mode:          "",
+			ModeTooltip:   "",
+			Summary:       "",
+			TotalPages:    0,
+			PreCap:        0,
+			CapSource:     "none",
+			CapValue:      0,
+			Pages:         []*LivingWikiPlanPage{},
+			Notice:        &notice,
+		}, nil
+	}
+
+	// ── 2. Validate pageCountOverride ────────────────────────────────────────
+	//
+	// Same 1..500 range check as EnableLivingWikiForRepo:2541-2555. Validated
+	// before settings load so the error is cheap.
+	if pageCountOverride != nil {
+		v := *pageCountOverride
+		if v < 1 || v > 500 {
+			return nil, &gqlerror.Error{
+				Message: fmt.Sprintf("pageCountOverride must be between 1 and 500 (got %d)", v),
+				Extensions: map[string]any{
+					"code": "LIVING_WIKI_INVALID_PAGE_COUNT_OVERRIDE",
+				},
+			}
+		}
+	}
+
+	// ── 3. Reject ALL_ENABLED mode ───────────────────────────────────────────
+	//
+	// The plan preview is for single explicit-mode builds. ALL_ENABLED is
+	// handled by two separate cold-start enqueues upstream and is out of scope
+	// (codex r1 M3 / Decision 8). Reject before touching settings to keep the
+	// error fast and self-describing.
+	if mode != nil && *mode == LivingWikiBuildModeAllEnabled {
+		return nil, &gqlerror.Error{
+			Message: "previewLivingWikiPlan does not support ALL_ENABLED mode",
+			Extensions: map[string]any{
+				"code": "PREVIEW_MODE_NOT_SUPPORTED",
+			},
+		}
+	}
+
+	// ── 4. Resolve effective mode ────────────────────────────────────────────
+	//
+	// When mode is nil we derive it from the current repo settings, exactly as
+	// EnableLivingWikiForRepo does (deriveLivingWikiJobMode on persisted row).
+	var modeStr string
+	switch {
+	case mode != nil && *mode == LivingWikiBuildModeOverview:
+		modeStr = GenerationModeLWOverview
+	case mode != nil && *mode == LivingWikiBuildModeDetailed:
+		modeStr = GenerationModeLWDetailed
+	default:
+		// nil → derive from effective settings. Load existing repo settings; if
+		// none exist yet, fall back to lw_detailed (the established default).
+		if r.Deps.LivingWikiRepoStore != nil {
+			existing, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+			if err != nil {
+				return nil, fmt.Errorf("load repo settings: %w", err)
+			}
+			if existing != nil {
+				modeStr = deriveLivingWikiJobMode(*existing)
+			}
+		}
+		if modeStr == "" {
+			modeStr = GenerationModeLWDetailed
+		}
+	}
+
+	// ── 5. Resolve frozen LLM caller ─────────────────────────────────────────
+	//
+	// Preview MUST use the same snapshot strategy as cold-start so the page
+	// list a user reviews reflects the model that will actually be used at
+	// build time. On resolver error we continue with a nil frozenCaller —
+	// resolveTaxonomyForMode degrades gracefully without one.
+	var frozenCaller *llmcall.Caller
+	if r.Deps.LLMResolver != nil && r.Deps.LLMCaller != nil {
+		snap, resolveErr := r.Deps.LLMResolver.Resolve(ctx, repositoryID, resolution.OpLivingWikiColdStart)
+		if resolveErr == nil {
+			frozenCaller = llmcall.New(r.Deps.LLMCaller.Inner(), resolution.NewFrozenResolver(snap), nil)
+		}
+	}
+
+	// ── 6. Resolve taxonomy ───────────────────────────────────────────────────
+	graphStore := r.getStore(ctx)
+	pages, err := resolveTaxonomyForMode(ctx, modeStr, repositoryID, graphStore, frozenCaller, r.Deps.ClusterStore)
+	if err != nil {
+		return nil, fmt.Errorf("living-wiki: taxonomy resolution failed: %w", err)
+	}
+
+	// ── 7. Resolve MaxPagesPerJob ─────────────────────────────────────────────
+	//
+	// Load repo settings to obtain MaxPagesPerJob for the cap formula.
+	// If no settings row exists, maxPagesPerJob = 0 (no cap).
+	var maxPagesPerJob int
+	if r.Deps.LivingWikiRepoStore != nil {
+		if existing, sErr := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID); sErr == nil && existing != nil {
+			maxPagesPerJob = existing.MaxPagesPerJob
+		}
+	}
+
+	// ── 8. Apply page-count cap ───────────────────────────────────────────────
+	//
+	// excludedOnlyRetry=false — preview is never a retry-excluded path.
+	cappedPages, capSource, capValue, effectiveCap, preCap := applyPageCap(
+		pages, maxPagesPerJob, pageCountOverride, false,
+	)
+
+	// ── 9. Compute planSignature ──────────────────────────────────────────────
+	//
+	// Signature is over (sorted page IDs, modeStr, effectiveCap) — the same
+	// formula used by EnableLivingWikiForRepo's validator so symmetry is
+	// mechanical (both call computePlanSignature from living_wiki_plan_helpers.go).
+	pageIDs := make([]string, len(cappedPages))
+	for i, p := range cappedPages {
+		pageIDs[i] = p.ID
+	}
+	planSig := computePlanSignature(pageIDs, modeStr, effectiveCap)
+
+	// ── 10. Build response pages ──────────────────────────────────────────────
+	gqlPages := make([]*LivingWikiPlanPage, 0, len(cappedPages))
+	for _, p := range cappedPages {
+		page := plannedPageToGQL(p)
+		gqlPages = append(gqlPages, page)
+	}
+
+	// ── 11. Build summary (for slog / debug; UI overrides display text) ───────
+	var clusterPages, topLevelDirPages, repoWidePages int
+	for _, p := range cappedPages {
+		switch classifyPageType(p) {
+		case LivingWikiPageTypeRepoWide:
+			repoWidePages++
+		case LivingWikiPageTypeArchitecture:
+			clusterPages++
+		default:
+			topLevelDirPages++
+		}
+	}
+	summary := buildPlanningSummary(modeStr, len(cappedPages), clusterPages, topLevelDirPages, repoWidePages, capSource, capValue, preCap)
+
+	return &LivingWikiPlan{
+		PlanSignature: planSig,
+		Mode:          modeStr,
+		ModeTooltip:   modeTooltip(modeStr),
+		Summary:       summary,
+		TotalPages:    len(cappedPages),
+		PreCap:        preCap,
+		CapSource:     capSource,
+		CapValue:      capValue,
+		Pages:         gqlPages,
+	}, nil
+}
+*/

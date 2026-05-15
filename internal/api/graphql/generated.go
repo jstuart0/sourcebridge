@@ -323,6 +323,11 @@ type ComplexityRoot struct {
 		Settings func(childComplexity int) int
 	}
 
+	EnrichAllRequirementsResult struct {
+		JobID              func(childComplexity int) int
+		RequirementsQueued func(childComplexity int) int
+	}
+
 	ExecutionEntryPoint struct {
 		FilePath  func(childComplexity int) int
 		Kind      func(childComplexity int) int
@@ -360,10 +365,12 @@ type ComplexityRoot struct {
 	}
 
 	ExplainSystemResult struct {
-		Explanation  func(childComplexity int) int
-		InputTokens  func(childComplexity int) int
-		Model        func(childComplexity int) int
-		OutputTokens func(childComplexity int) int
+		Explanation         func(childComplexity int) int
+		InputTokens         func(childComplexity int) int
+		Model               func(childComplexity int) int
+		OutputTokens        func(childComplexity int) int
+		References          func(childComplexity int) int
+		RelatedRequirements func(childComplexity int) int
 	}
 
 	Features struct {
@@ -690,7 +697,8 @@ type ComplexityRoot struct {
 		DismissDiscoveredRequirement         func(childComplexity int, id string, reason *string) int
 		EmptyTrash                           func(childComplexity int, repositoryID string, olderThanDays *int) int
 		EnableLivingWikiForRepo              func(childComplexity int, input EnableLivingWikiForRepoInput) int
-		EnrichRequirement                    func(childComplexity int, requirementID string) int
+		EnrichAllRequirements                func(childComplexity int, repositoryID string, force *bool, batchSize *int) int
+		EnrichRequirement                    func(childComplexity int, requirementID string, force *bool) int
 		ExplainSystem                        func(childComplexity int, input ExplainSystemInput) int
 		GenerateArchitectureDiagram          func(childComplexity int, input GenerateArchitectureDiagramInput) int
 		GenerateCliffNotes                   func(childComplexity int, input GenerateCliffNotesInput) int
@@ -1160,7 +1168,8 @@ type MutationResolver interface {
 	ReviewCode(ctx context.Context, input ReviewCodeInput) (*ReviewResult, error)
 	Ask(ctx context.Context, input AskInput) (*AskResult, error)
 	AutoLinkRequirements(ctx context.Context, repositoryID string, minConfidence *float64) (*AutoLinkResult, error)
-	EnrichRequirement(ctx context.Context, requirementID string) (*Requirement, error)
+	EnrichRequirement(ctx context.Context, requirementID string, force *bool) (*Requirement, error)
+	EnrichAllRequirements(ctx context.Context, repositoryID string, force *bool, batchSize *int) (*EnrichAllRequirementsResult, error)
 	SimulateChange(ctx context.Context, input SimulateChangeInput) (*SimulatedImpactReport, error)
 	TriggerSpecExtraction(ctx context.Context, input TriggerSpecExtractionInput) (*SpecExtractionResult, error)
 	PromoteDiscoveredRequirement(ctx context.Context, id string, title *string, description *string) (*PromoteResult, error)
@@ -2590,6 +2599,20 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.EnableLivingWikiResult.Settings(childComplexity), true
 
+	case "EnrichAllRequirementsResult.jobId":
+		if e.complexity.EnrichAllRequirementsResult.JobID == nil {
+			break
+		}
+
+		return e.complexity.EnrichAllRequirementsResult.JobID(childComplexity), true
+
+	case "EnrichAllRequirementsResult.requirementsQueued":
+		if e.complexity.EnrichAllRequirementsResult.RequirementsQueued == nil {
+			break
+		}
+
+		return e.complexity.EnrichAllRequirementsResult.RequirementsQueued(childComplexity), true
+
 	case "ExecutionEntryPoint.filePath":
 		if e.complexity.ExecutionEntryPoint.FilePath == nil {
 			break
@@ -2806,6 +2829,20 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.ExplainSystemResult.OutputTokens(childComplexity), true
+
+	case "ExplainSystemResult.references":
+		if e.complexity.ExplainSystemResult.References == nil {
+			break
+		}
+
+		return e.complexity.ExplainSystemResult.References(childComplexity), true
+
+	case "ExplainSystemResult.relatedRequirements":
+		if e.complexity.ExplainSystemResult.RelatedRequirements == nil {
+			break
+		}
+
+		return e.complexity.ExplainSystemResult.RelatedRequirements(childComplexity), true
 
 	case "Features.advancedLearningPaths":
 		if e.complexity.Features.AdvancedLearningPaths == nil {
@@ -4612,6 +4649,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Mutation.EnableLivingWikiForRepo(childComplexity, args["input"].(EnableLivingWikiForRepoInput)), true
 
+	case "Mutation.enrichAllRequirements":
+		if e.complexity.Mutation.EnrichAllRequirements == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_enrichAllRequirements_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.EnrichAllRequirements(childComplexity, args["repositoryId"].(string), args["force"].(*bool), args["batchSize"].(*int)), true
+
 	case "Mutation.enrichRequirement":
 		if e.complexity.Mutation.EnrichRequirement == nil {
 			break
@@ -4622,7 +4671,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.EnrichRequirement(childComplexity, args["requirementId"].(string)), true
+		return e.complexity.Mutation.EnrichRequirement(childComplexity, args["requirementId"].(string), args["force"].(*bool)), true
 
 	case "Mutation.explainSystem":
 		if e.complexity.Mutation.ExplainSystem == nil {
@@ -8065,6 +8114,80 @@ func (ec *executionContext) field_Mutation_enableLivingWikiForRepo_argsInput(
 	return zeroVal, nil
 }
 
+func (ec *executionContext) field_Mutation_enrichAllRequirements_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_enrichAllRequirements_argsRepositoryID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["repositoryId"] = arg0
+	arg1, err := ec.field_Mutation_enrichAllRequirements_argsForce(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["force"] = arg1
+	arg2, err := ec.field_Mutation_enrichAllRequirements_argsBatchSize(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["batchSize"] = arg2
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_enrichAllRequirements_argsRepositoryID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["repositoryId"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("repositoryId"))
+	if tmp, ok := rawArgs["repositoryId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_enrichAllRequirements_argsForce(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*bool, error) {
+	if _, ok := rawArgs["force"]; !ok {
+		var zeroVal *bool
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("force"))
+	if tmp, ok := rawArgs["force"]; ok {
+		return ec.unmarshalOBoolean2ᚖbool(ctx, tmp)
+	}
+
+	var zeroVal *bool
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_enrichAllRequirements_argsBatchSize(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*int, error) {
+	if _, ok := rawArgs["batchSize"]; !ok {
+		var zeroVal *int
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("batchSize"))
+	if tmp, ok := rawArgs["batchSize"]; ok {
+		return ec.unmarshalOInt2ᚖint(ctx, tmp)
+	}
+
+	var zeroVal *int
+	return zeroVal, nil
+}
+
 func (ec *executionContext) field_Mutation_enrichRequirement_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -8073,6 +8196,11 @@ func (ec *executionContext) field_Mutation_enrichRequirement_args(ctx context.Co
 		return nil, err
 	}
 	args["requirementId"] = arg0
+	arg1, err := ec.field_Mutation_enrichRequirement_argsForce(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["force"] = arg1
 	return args, nil
 }
 func (ec *executionContext) field_Mutation_enrichRequirement_argsRequirementID(
@@ -8090,6 +8218,24 @@ func (ec *executionContext) field_Mutation_enrichRequirement_argsRequirementID(
 	}
 
 	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_enrichRequirement_argsForce(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*bool, error) {
+	if _, ok := rawArgs["force"]; !ok {
+		var zeroVal *bool
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("force"))
+	if tmp, ok := rawArgs["force"]; ok {
+		return ec.unmarshalOBoolean2ᚖbool(ctx, tmp)
+	}
+
+	var zeroVal *bool
 	return zeroVal, nil
 }
 
@@ -20237,6 +20383,94 @@ func (ec *executionContext) fieldContext_EnableLivingWikiResult_notice(_ context
 	return fc, nil
 }
 
+func (ec *executionContext) _EnrichAllRequirementsResult_jobId(ctx context.Context, field graphql.CollectedField, obj *EnrichAllRequirementsResult) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_EnrichAllRequirementsResult_jobId(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.JobID, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNString2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_EnrichAllRequirementsResult_jobId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "EnrichAllRequirementsResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _EnrichAllRequirementsResult_requirementsQueued(ctx context.Context, field graphql.CollectedField, obj *EnrichAllRequirementsResult) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_EnrichAllRequirementsResult_requirementsQueued(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.RequirementsQueued, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(int)
+	fc.Result = res
+	return ec.marshalNInt2int(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_EnrichAllRequirementsResult_requirementsQueued(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "EnrichAllRequirementsResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _ExecutionEntryPoint_kind(ctx context.Context, field graphql.CollectedField, obj *ExecutionEntryPoint) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_ExecutionEntryPoint_kind(ctx, field)
 	if err != nil {
@@ -21577,6 +21811,110 @@ func (ec *executionContext) fieldContext_ExplainSystemResult_outputTokens(_ cont
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ExplainSystemResult_references(ctx context.Context, field graphql.CollectedField, obj *ExplainSystemResult) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_ExplainSystemResult_references(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.References, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.([]*AskReference)
+	fc.Result = res
+	return ec.marshalNAskReference2ᚕᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐAskReferenceᚄ(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_ExplainSystemResult_references(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ExplainSystemResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "kind":
+				return ec.fieldContext_AskReference_kind(ctx, field)
+			case "title":
+				return ec.fieldContext_AskReference_title(ctx, field)
+			case "symbol":
+				return ec.fieldContext_AskReference_symbol(ctx, field)
+			case "fileRange":
+				return ec.fieldContext_AskReference_fileRange(ctx, field)
+			case "requirement":
+				return ec.fieldContext_AskReference_requirement(ctx, field)
+			case "understandingSection":
+				return ec.fieldContext_AskReference_understandingSection(ctx, field)
+			case "crossRepo":
+				return ec.fieldContext_AskReference_crossRepo(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type AskReference", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ExplainSystemResult_relatedRequirements(ctx context.Context, field graphql.CollectedField, obj *ExplainSystemResult) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_ExplainSystemResult_relatedRequirements(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.RelatedRequirements, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.([]string)
+	fc.Result = res
+	return ec.marshalNString2ᚕstringᚄ(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_ExplainSystemResult_relatedRequirements(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ExplainSystemResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
 		},
 	}
 	return fc, nil
@@ -32931,7 +33269,7 @@ func (ec *executionContext) _Mutation_enrichRequirement(ctx context.Context, fie
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
 		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Mutation().EnrichRequirement(rctx, fc.Args["requirementId"].(string))
+		return ec.resolvers.Mutation().EnrichRequirement(rctx, fc.Args["requirementId"].(string), fc.Args["force"].(*bool))
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -32990,6 +33328,67 @@ func (ec *executionContext) fieldContext_Mutation_enrichRequirement(ctx context.
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_enrichRequirement_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_enrichAllRequirements(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_enrichAllRequirements(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().EnrichAllRequirements(rctx, fc.Args["repositoryId"].(string), fc.Args["force"].(*bool), fc.Args["batchSize"].(*int))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*EnrichAllRequirementsResult)
+	fc.Result = res
+	return ec.marshalNEnrichAllRequirementsResult2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐEnrichAllRequirementsResult(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_enrichAllRequirements(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "jobId":
+				return ec.fieldContext_EnrichAllRequirementsResult_jobId(ctx, field)
+			case "requirementsQueued":
+				return ec.fieldContext_EnrichAllRequirementsResult_requirementsQueued(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type EnrichAllRequirementsResult", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_enrichAllRequirements_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -34238,6 +34637,10 @@ func (ec *executionContext) fieldContext_Mutation_explainSystem(ctx context.Cont
 				return ec.fieldContext_ExplainSystemResult_inputTokens(ctx, field)
 			case "outputTokens":
 				return ec.fieldContext_ExplainSystemResult_outputTokens(ctx, field)
+			case "references":
+				return ec.fieldContext_ExplainSystemResult_references(ctx, field)
+			case "relatedRequirements":
+				return ec.fieldContext_ExplainSystemResult_relatedRequirements(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type ExplainSystemResult", field.Name)
 		},
@@ -56225,6 +56628,50 @@ func (ec *executionContext) _EnableLivingWikiResult(ctx context.Context, sel ast
 	return out
 }
 
+var enrichAllRequirementsResultImplementors = []string{"EnrichAllRequirementsResult"}
+
+func (ec *executionContext) _EnrichAllRequirementsResult(ctx context.Context, sel ast.SelectionSet, obj *EnrichAllRequirementsResult) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, enrichAllRequirementsResultImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("EnrichAllRequirementsResult")
+		case "jobId":
+			out.Values[i] = ec._EnrichAllRequirementsResult_jobId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "requirementsQueued":
+			out.Values[i] = ec._EnrichAllRequirementsResult_requirementsQueued(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var executionEntryPointImplementors = []string{"ExecutionEntryPoint"}
 
 func (ec *executionContext) _ExecutionEntryPoint(ctx context.Context, sel ast.SelectionSet, obj *ExecutionEntryPoint) graphql.Marshaler {
@@ -56448,6 +56895,16 @@ func (ec *executionContext) _ExplainSystemResult(ctx context.Context, sel ast.Se
 			out.Values[i] = ec._ExplainSystemResult_inputTokens(ctx, field, obj)
 		case "outputTokens":
 			out.Values[i] = ec._ExplainSystemResult_outputTokens(ctx, field, obj)
+		case "references":
+			out.Values[i] = ec._ExplainSystemResult_references(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "relatedRequirements":
+			out.Values[i] = ec._ExplainSystemResult_relatedRequirements(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -58459,6 +58916,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "enrichRequirement":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_enrichRequirement(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "enrichAllRequirements":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_enrichAllRequirements(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -63441,6 +63905,20 @@ func (ec *executionContext) marshalNEnableLivingWikiResult2ᚖgithubᚗcomᚋsou
 		return graphql.Null
 	}
 	return ec._EnableLivingWikiResult(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNEnrichAllRequirementsResult2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐEnrichAllRequirementsResult(ctx context.Context, sel ast.SelectionSet, v EnrichAllRequirementsResult) graphql.Marshaler {
+	return ec._EnrichAllRequirementsResult(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNEnrichAllRequirementsResult2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐEnrichAllRequirementsResult(ctx context.Context, sel ast.SelectionSet, v *EnrichAllRequirementsResult) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._EnrichAllRequirementsResult(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNEvidenceSourceType2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐEvidenceSourceType(ctx context.Context, v any) (EvidenceSourceType, error) {

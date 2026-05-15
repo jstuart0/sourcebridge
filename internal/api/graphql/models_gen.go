@@ -392,6 +392,14 @@ type EnableLivingWikiResult struct {
 	Notice *string `json:"notice,omitempty"`
 }
 
+// Result of the enrichAllRequirements bulk mutation.
+// The jobId is visible on the admin Monitor page and can be used to poll progress
+// via the existing LLM activity feed.
+type EnrichAllRequirementsResult struct {
+	JobID              string `json:"jobId"`
+	RequirementsQueued int    `json:"requirementsQueued"`
+}
+
 type ExecutionEntryPoint struct {
 	Kind      ExecutionEntryKind `json:"kind"`
 	Label     string             `json:"label"`
@@ -450,6 +458,13 @@ type ExplainSystemResult struct {
 	Model        *string `json:"model,omitempty"`
 	InputTokens  *int    `json:"inputTokens,omitempty"`
 	OutputTokens *int    `json:"outputTokens,omitempty"`
+	// Symbol, file, and requirement references drawn from the evidence the worker
+	// cited when generating the explanation. Empty when the worker returned no
+	// evidence (e.g. fast/summary depth). Mirrors the AskResult.references shape.
+	References []*AskReference `json:"references"`
+	// IDs of requirements that are contextually related to the explanation.
+	// Drawn from requirement-type evidence items in the worker response.
+	RelatedRequirements []string `json:"relatedRequirements"`
 }
 
 type Features struct {
