@@ -4,6 +4,61 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.12.0-rc.3...v0.13.0-rc.3) (2026-05-15)
+
+
+### Added
+
+* **admin:** surface Ollama model-loaded state on /api/v1/admin/llm/activity ([ce56f54](https://github.com/sourcebridge-ai/sourcebridge/commit/ce56f545e2f129eb10839946f930802b4aef1138))
+* **auth:** thread password_min_length to CLI + web consumers (CA-321) ([fa3fd2a](https://github.com/sourcebridge-ai/sourcebridge/commit/fa3fd2aee3e85ebaebc74b03f7837eb2f81cdbc5))
+* **helm:** render writable emptyDirs when readOnlyRootFilesystem=true (CA-322) ([6e74da2](https://github.com/sourcebridge-ai/sourcebridge/commit/6e74da2e24d7edd5ffc7276bdafce99e2166f15a))
+* **security:** phase 7 — LLM base URL SSRF guard + password min-length configurable + surrealLLMConfig DTO (CA-320) ([0672ba8](https://github.com/sourcebridge-ai/sourcebridge/commit/0672ba8e58f6418e1411fb46d932f64ea8002f45))
+* telemetry agent — internal/usage rolling counters + Counts payload (CA-400 phase 2) ([86330d1](https://github.com/sourcebridge-ai/sourcebridge/commit/86330d1af0c211ad8f0f80a72d12a2eb9220a6f9))
+* **web,security:** phase 6 — Next.js CSP + PostHog PII removal + MCP probe gate (CA-320) ([996069c](https://github.com/sourcebridge-ai/sourcebridge/commit/996069c360a545bdfb39ec7b2f621bde58e5a789))
+* **web:** alias ?tab=field-guide and ?tab=cliff-notes to knowledge tab (CA-252) ([a4b9e10](https://github.com/sourcebridge-ai/sourcebridge/commit/a4b9e105f9694e6918cd8b7f4bf1a7cac1e242ff))
+* **web:** phase 3 — UX + a11y polish (useAsyncOp, skeleton, tooltips, forms, sidebar, topbar, openCategory) (CA-320) ([cd72648](https://github.com/sourcebridge-ai/sourcebridge/commit/cd726480ca731241110235ed0f445a9c64a96927))
+* **web:** render Ollama model-swap warning on admin monitor page ([aa35a9b](https://github.com/sourcebridge-ai/sourcebridge/commit/aa35a9b3ac2f1f4782d003076986e74f56cf3b1c))
+* **web:** ruby audit Low batch — a11y + UX polish (CA-271..278, CA-269, CA-273) ([8cc3554](https://github.com/sourcebridge-ai/sourcebridge/commit/8cc3554a9f91aa9e775bc80a1f41da7d84027221))
+* **web:** sticky Simple/Advanced mode toggle on long-scroll (CA-264) ([3a9d049](https://github.com/sourcebridge-ai/sourcebridge/commit/3a9d049b3ddfc0c1dc13901a04fd64f88510dd5d))
+
+
+### Fixed
+
+* **ci:** unused qa_deps helpers, button-test types, worker import sort ([abf5e55](https://github.com/sourcebridge-ai/sourcebridge/commit/abf5e55469af512ff7a0312bae55336b2e6cc8aa))
+* **ci:** use Parameters&lt;typeof useQuery&gt;[0] instead of any for mock signature ([78c3f87](https://github.com/sourcebridge-ai/sourcebridge/commit/78c3f87a51e390e70ae687c0eb9167feea7d055c))
+* **code-health:** phase 2 — coerce helpers, joinComma deletion, UNCAPPED_SENTINEL, StoreRequirements error-return, sentinel errors, resolver dedup (CA-320) ([ab19334](https://github.com/sourcebridge-ai/sourcebridge/commit/ab193348527518537f65ad9210a9b4ac32461232))
+* **graphql:** scrub low-level storage errors before they reach the browser ([b51c5f1](https://github.com/sourcebridge-ai/sourcebridge/commit/b51c5f1fbeb371e7d50acd879845377edcf6d139))
+* **infra:** reconcile Phase 5 — Helm networkPolicy template (CA-320) ([4cf332b](https://github.com/sourcebridge-ai/sourcebridge/commit/4cf332bb5e3f4a5b157dea7654e70185d22912ed))
+* **qa:** CA-324 — discussCode prompt structure + null usage + silent empty answers ([5ba768c](https://github.com/sourcebridge-ai/sourcebridge/commit/5ba768cf9d614dd16db0ae71b9b52d4490eee0ea))
+* **qa:** CA-324 Fix B follow-up — AskModelResolver + synthesis_failed path ([5d5f685](https://github.com/sourcebridge-ai/sourcebridge/commit/5d5f685b1cb7c87059d40775a4b16c1e1c04fa37))
+* **qa:** CA-325 — make discussion-class RPC timeout operator-configurable ([4736b83](https://github.com/sourcebridge-ai/sourcebridge/commit/4736b83b986e986e1b0ecb8141121ebbd479f5af))
+* **qa:** CA-326 — pin QA synth to MaxAttempts=1 + log provider-overload hint ([f40ccbd](https://github.com/sourcebridge-ai/sourcebridge/commit/f40ccbd9af1c01252da8ae897068cd25e8cfa77f))
+* **security,infra:** reconcile codex r2 — worker SSRF wiring, sanitization, Helm memory default, PostHog tenant_id, CSP test, README (CA-320) ([eb1df44](https://github.com/sourcebridge-ai/sourcebridge/commit/eb1df4473c2b15515e9b4f4a017f401e488e0148))
+* **security:** phase 1 — HSTS + token validation + JSON error sanitization + OIDC scrub + CORS guard (CA-320) ([0d5f6ab](https://github.com/sourcebridge-ai/sourcebridge/commit/0d5f6ab3901aa20704c5748700fc2437a36952b4))
+* **security:** phase 1 follow-ups — trimmedName stored, HSTS docs, config.toml.example, CORS error message (CA-320) ([a58336f](https://github.com/sourcebridge-ai/sourcebridge/commit/a58336f0ceb176a51148b51c46d3ef0a06f407f2))
+* **web:** admin monitor mode-card uses control-radius token (CA-269 amend) ([802febe](https://github.com/sourcebridge-ai/sourcebridge/commit/802febe401afa430b2c28bfd9ef348742b5f5020))
+* **web:** CA-363/364/365/370/U-M4 — error states, button consolidation, contrast ([3d3e911](https://github.com/sourcebridge-ai/sourcebridge/commit/3d3e911772656d139de2e85814cedba97d5eb30b))
+* **workers:** CA-181 result_holder IndexError — append, not index-assign ([d79344c](https://github.com/sourcebridge-ai/sourcebridge/commit/d79344c07517f3f7467d27c562a9b304460dc0fa))
+
+
+### Changed
+
+* canonical discussionContextFromArtifact in internal/knowledge (CA-329) ([9e93068](https://github.com/sourcebridge-ai/sourcebridge/commit/9e93068183a26a65f55625173c2a872ec0675275))
+* canonical qa.JobTypeToOp helper for REST/GraphQL convergence (CA-327) ([7f4cf74](https://github.com/sourcebridge-ai/sourcebridge/commit/7f4cf74dbc9582c1e7558c7cb4299d30fb895061))
+* **db:** extract sqlbuild.Builder for 4 SET-clause sites (CA-306) ([fdad166](https://github.com/sourcebridge-ai/sourcebridge/commit/fdad1663c2dfde5753a90934ee9f1b89909d4c08))
+* dexter audit Low batch — fragment, stdlib, enum logging, dead alias (CA-195, CA-196, CA-197, CA-199, CA-310) ([625bf31](https://github.com/sourcebridge-ai/sourcebridge/commit/625bf311c46e2e284b6eca4b9cf72f6dd8845629))
+* **rest:** collapse rest.Server mirror fields onto Deps *appdeps.AppDeps (CA-328) ([2e0f670](https://github.com/sourcebridge-ai/sourcebridge/commit/2e0f6705201087ce70a20464bee789ec286aae5f))
+
+
+### Documentation
+
+* aggregate CLAUDE.md entry for 2026-05-13 audit-remediation campaign (21 C+H + 2 M co-fixes) ([c9ee1ab](https://github.com/sourcebridge-ai/sourcebridge/commit/c9ee1abdc0a07e4189d376ef272a877d1e78c2df))
+* CHANGELOG + CLAUDE.md for audit Medium cleanup campaign (CA-320) ([939e9e4](https://github.com/sourcebridge-ai/sourcebridge/commit/939e9e4dec96c10566644a5ad36f95e0e66ba302))
+* CHANGELOG + CLAUDE.md for CA-324/325/326 + gqlgen scrubber ([f5b4be4](https://github.com/sourcebridge-ai/sourcebridge/commit/f5b4be431e15a3523eadfcb72823176672ece7a6))
+* CLAUDE.md entry + finalize campaign artifacts for CA-400 telemetry metrics expansion ([d9ec4a4](https://github.com/sourcebridge-ai/sourcebridge/commit/d9ec4a4aea2035cde50c47872a7260b04333baec))
+* fix duplicate section numbering in telemetry-collector-qa-fields.md (CA-400 post-validation) ([2cc6266](https://github.com/sourcebridge-ai/sourcebridge/commit/2cc6266d5a2effd5050c2ba32240a4175b2ec613))
+* **tests:** document nil-store scope on phase1 setupTestServer (CA-288) ([fb3577a](https://github.com/sourcebridge-ai/sourcebridge/commit/fb3577ac97c46a813039941ad11449215e10a2d6))
+
 ## [Unreleased]
 
 ### BREAKING
