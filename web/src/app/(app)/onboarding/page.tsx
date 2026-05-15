@@ -54,10 +54,17 @@ export default function OnboardingPage() {
       />
 
       <div className="mx-auto w-full max-w-3xl space-y-8">
-        <div className="grid grid-cols-3 gap-3">
+        <div
+          className="grid grid-cols-3 gap-3"
+          role="list"
+          aria-label={`Step ${stepIndex + 1} of ${steps.length}`}
+        >
           {steps.map((item, index) => (
             <div
               key={item}
+              role="listitem"
+              aria-label={`Step ${index + 1} of ${steps.length}`}
+              aria-current={index === stepIndex ? "step" : undefined}
               className={cn(
                 "h-1.5 rounded-full",
                 index <= stepIndex ? "bg-[var(--accent-primary)]" : "bg-[var(--border-default)]"
