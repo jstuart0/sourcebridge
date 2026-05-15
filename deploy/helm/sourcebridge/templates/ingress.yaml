@@ -5,10 +5,20 @@ metadata:
   name: {{ include "sourcebridge.fullname" . }}
   labels:
     {{- include "sourcebridge.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
   annotations:
+    {{- /*
+    CA-106: wire the ServersTransport CRD (see templates/middleware.yaml) so Traefik
+    extends the proxy timeout for the API service to ingress.graphqlTimeoutSeconds
+    (default 300s). Long-running GraphQL mutations (indexing, bulk auto-link, knowledge
+    generation) would otherwise hit Traefik's 30s default and return 504.
+
+    The annotation value format is "<namespace>-<name>@kubernetescrd".
+    See: https://doc.traefik.io/traefik/routing/providers/kubernetes-ingress/#on-ingress
+    */}}
+    traefik.ingress.kubernetes.io/service.serversTransport: {{ .Release.Namespace }}-{{ include "sourcebridge.fullname" . }}-api-timeout@kubernetescrd
+    {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- end }}
 spec:
   # CA-318 / otto Medium #21: ingressClassName defaults to "traefik".
   # On clusters with multiple controllers (e.g. traefik + nginx), an empty

@@ -1,0 +1,69 @@
+# CA-156: CSP regression check
+#
+# Builds the Next.js app in production mode, starts `next start`, and probes
+# key routes via headless Chromium for Content-Security-Policy violations.
+# Catches future dependency drift that would reintroduce unsafe-eval
+# (regression of Phase 5 Slice 7, 2026-05-04 audit).
+#
+# SOAK WINDOW: continue-on-error is intentionally true for the initial rollout
+# period while we tune detection and confirm no false-positives in CI. See
+# CHANGELOG.md "Known gaps" section. Remove continue-on-error once the check
+# is confirmed stable (~2026-05-29 target).
+#
+# To run the check manually on a branch:
+#   gh workflow run csp-check.yml --ref <branch>
+
+name: csp-check
+
+on:
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/csp-check.yml"
+  workflow_dispatch: {}
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  csp-violation-check:
+    name: CSP violation check (headless Chromium)
+    runs-on: ubuntu-latest
+    # CA-156 SOAK: non-blocking for the first two weeks after rollout.
+    # Remove this line once stable (~2026-05-29).
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js app (production mode)
+        run: npm run build
+        env:
+          # Suppress telemetry during CI builds.
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      # Install Playwright + Chromium browser binary. We do this in the workflow
+      # rather than adding @playwright/test to web/package.json so it stays out
+      # of the production install and doesn't bloat the web Docker image.
+      - name: Install Playwright + Chromium
+        run: npx --yes playwright@latest install --with-deps chromium
+
+      - name: Run CSP violation check
+        run: node scripts/csp-violation-check.mjs
+        env:
+          PORT: "3300"
+          NEXT_TELEMETRY_DISABLED: "1"
+          # Give the server up to 45s to start in CI (cold container, no cache warm).
+          NEXT_START_TIMEOUT_MS: "45000"

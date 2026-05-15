@@ -316,6 +316,14 @@ ingress:
   #       - sourcebridge.example.com
   #     secretName: sourcebridge-tls
 
+  # -- CA-106: Traefik proxy timeout for the API service, in seconds.
+  # Long-running GraphQL mutations (indexing, bulk auto-link, knowledge generation)
+  # can exceed Traefik's 30s default and return 504 Gateway Timeout errors.
+  # This value is injected into the ServersTransport CRD (templates/middleware.yaml)
+  # as responseHeaderTimeout. Set higher (e.g. 600) for very slow LLM providers.
+  # Only applies when ingress.enabled is true and className is "traefik".
+  graphqlTimeoutSeconds: 300
+
 # ─── Network Policy ──────────────────────────────────────────────────
 networkPolicy:
   # -- Enable NetworkPolicy hardening. Rolls out a default-deny-all policy plus

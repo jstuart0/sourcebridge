@@ -1,0 +1,35 @@
+{{- /*
+CA-106: ServersTransport CRD that extends Traefik's proxy timeout for the API service.
+Long-running GraphQL mutations (indexing, bulk auto-link, knowledge generation) require
+more than the 30s Traefik default. The timeout is operator-tunable via
+ingress.graphqlTimeoutSeconds (default 300).
+
+This resource is only created when ingress.enabled is true, since ServersTransport is
+meaningful only when Traefik is routing traffic to this install.
+
+Traefik v2.x / v3.x reference:
+  https://doc.traefik.io/traefik/routing/services/#serverstransport_1
+*/}}
+{{- if .Values.ingress.enabled }}
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-api-timeout
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.labels" . | nindent 4 }}
+spec:
+  forwardingTimeouts:
+    # dialTimeout: how long to wait for a TCP connection to the backend.
+    # 30s is adequate; indexing timeouts are response-header latency, not dial latency.
+    dialTimeout: 30s
+    # responseHeaderTimeout: how long to wait for the backend to start sending
+    # response headers after the full request body is sent. Long-running GraphQL
+    # mutations block here. Default Traefik value is 0 (no limit per RFC); the
+    # Traefik proxy timeout that bites us comes from the *router* level (30s default
+    # on the Ingress path). Setting this explicitly ensures we stay within a safe
+    # operator-configurable ceiling regardless of global Traefik defaults.
+    responseHeaderTimeout: {{ .Values.ingress.graphqlTimeoutSeconds | default 300 }}s
+    # idleConnTimeout: how long idle keep-alive connections are kept in the pool.
+    idleConnTimeout: 90s
+{{- end }}
