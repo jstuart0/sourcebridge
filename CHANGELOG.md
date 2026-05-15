@@ -4,6 +4,19 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.13.1-rc.3...v0.14.0-rc.3) (2026-05-15)
+
+
+### Added
+
+* **graphql:** explain result refs + tag-merge enrichment + bulk mutation (CA-86, CA-88, CA-89) ([e9ab059](https://github.com/sourcebridge-ai/sourcebridge/commit/e9ab0596c2d6a80416f77a3358d05c3d565c7ad6))
+
+
+### Fixed
+
+* **ci:** UP037 — remove quotes from in-class type annotations (CA-172 follow-up) ([7540a13](https://github.com/sourcebridge-ai/sourcebridge/commit/7540a131ced8ddd46c23b47e085c32b79598ae5f))
+* **concurrency:** optimistic LWiki settings + per-request provider gate (CA-158, CA-172) ([0da7533](https://github.com/sourcebridge-ai/sourcebridge/commit/0da7533217332bc21154c7522475279b35ed51af))
+
 ## [0.13.1-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.13.0-rc.3...v0.13.1-rc.3) (2026-05-15)
 
 
