@@ -175,6 +175,48 @@ All notable changes to SourceBridge are documented here. The format follows
 - **CA-231 status**: kustomize overlay `deploy/kubernetes/overlays/network-policy-hardened/` is fully complete — default-deny ingress+egress plus all 8 enumerated allow policies (DNS egress, API ingress/egress, worker ingress/egress, web ingress/egress, SurrealDB ingress, Redis ingress). Helm equivalent under `networkPolicy.enabled: true`. No further work needed for CA-231.
 - **CA-232, CA-296, CA-297 status**: web probes at `/api/health` (kustomize + Helm), SurrealDB `startupProbe` (kustomize + Helm), and SA `automountServiceAccountToken: false` (all 4 SAs in kustomize + Helm) were already shipped in prior campaigns. Verified and confirmed closed.
 
+### Tier 6 Lows batch (CA-234, CA-237, CA-277, CA-333, CA-341..344, CA-356..362, CA-382..389, CA-396..399)
+
+#### Security / Code Health (CA-341, CA-342, CA-343, CA-344, CA-333)
+
+- **CA-341**: `generateTokenSecret()` signature simplified — removed the dead `hashStr` return value that duplicated `legacyHashToken`. `internal/auth/api_tokens.go` import of `crypto/sha256` deleted; the private `hashToken` function (identical to `legacyHashToken`) removed. Test callers updated to use `legacyHashToken` directly.
+- **CA-342**: `extractUserIdentity` no longer silently falls back to `"admin"` when the identity source returns an empty `userID`. The fallback is removed; a `slog.WarnContext` fires instead so operators can see unauthenticated-identity events without grepping request logs.
+- **CA-343**: `NewAPITokenStore` now emits a `slog.Warn` at startup when no HMAC key is configured, prompting operators to set `SOURCEBRIDGE_SECURITY_HMAC_SECRET` before going to production.
+- **CA-344**: `handleGetLLMProfile` 500 error path and `mapProfileError` default branch now return `{"error":"profile_op_failed","correlation_id":"<uuid>"}` (machine-readable, no internal details); full error logged server-side at WARN with the same correlation ID. Closes an information-leak pattern first identified in the CA-320 gqlgen scrubber campaign.
+- **CA-333**: `syncJobOp` in `internal/api/rest/qa_deps.go` verified clean — the CA-327 campaign added `qa.JobTypeToOp` and updated the switch body, and `syncJobOp` itself remains accurate. No code change needed; ticket closed.
+
+#### Infra (CA-234, CA-237, CA-356..362)
+
+- **CA-234 / CA-359**: Kustomize base worker `Service` renamed from `worker` to `sourcebridge-worker`, matching the naming convention of the other services (`sourcebridge-api`, `sourcebridge-web`). `configmap.yaml` updated: `SOURCEBRIDGE_WORKER_ADDRESS` and `SOURCEBRIDGE_WORKER_TLS_SERVER_NAME` now reference `sourcebridge-worker.sourcebridge.svc.cluster.local`. `deploy/kubernetes/mtls-worker-cert.yaml` SAN entries updated from `worker.*` to `sourcebridge-worker.*`. Helm chart was already using `{{ include "sourcebridge.fullname" . }}-worker` — unaffected. **Migration note**: existing kustomize installs must run `kubectl apply -k deploy/kubernetes/base/` (the old `worker` Service is replaced; the `sourcebridge-worker` Service is created). Any in-cluster DNS override pointing at `worker.sourcebridge.svc.cluster.local` must be updated.
+- **CA-237**: `docs/going-to-production.md` updated with a "Repository Cache Path" section explaining the cold-start penalty (fresh clone on each restart) and how to mount a persistent PVC at `/var/cache/sourcebridge` for Docker Compose, kustomize, and Helm operators.
+- **CA-356**: Helm `redis.image.tag` changed from `7-alpine` to `7.4-alpine` — pins a stable patch-level tag to prevent silent rolling upgrades.
+- **CA-357**: Helm `api.resources.limits.memory` raised from `1Gi` to `2Gi`. Go API memory under indexing load regularly exceeds 1 GiB on repositories with large symbol graphs; the 1 Gi limit caused OOM kills on mid-size codebases.
+- **CA-358**: Helm `Chart.yaml` `home` and `sources` URLs corrected from `github.com/sourcebridge/sourcebridge` to `github.com/sourcebridge-ai/sourcebridge`.
+- **CA-359**: see CA-234 above.
+- **CA-360**: New kustomize overlay `deploy/kubernetes/overlays/seccomp-runtimedefault/` sets `seccompProfile.type: RuntimeDefault` on all three deployments (api, worker, web). Deployed independently of the `hardened` overlay (readOnlyRootFilesystem) so operators can apply seccomp without full hardening.
+- **CA-361**: `surrealdb.persistence.storageClass` in Helm `values.yaml` gains an inline comment warning operators to use a storage class with `reclaimPolicy: Retain` for SurrealDB to prevent data loss on StatefulSet recreation.
+- **CA-362**: `allow-api-ingress` NetworkPolicy in the `network-policy-hardened` overlay gains an inline comment documenting the selector adjustments required for nginx-ingress, Contour, and Istio gateway controllers (the default targets Traefik).
+
+#### UX / Web (CA-277, CA-381, CA-382..389, CA-399)
+
+- **CA-277**: Cliff Notes metadata consolidated from 5 stacked `<p>` lines to 2 rows: row 1 = generated-at · revision SHA · understanding fingerprint; row 2 = job status · reuse · refinement · deepening. Both rows use `filter(Boolean).join(" · ")` — empty fields are omitted silently.
+- **CA-381**: `aria-controls` on all accordion buttons in the knowledge tab verified already present from CA-320 Phase 3. Ticket closed; no code change.
+- **CA-382**: `selectClass` in `web/src/app/(app)/admin/llm/profile-editor.tsx` gains `appearance-auto`, restoring the native select arrow removed by Tailwind's preflight reset. Matches the existing pattern in `knowledge-tab.tsx`.
+- **CA-383**: Help page keyboard shortcuts section expanded from 1 entry (`Cmd+K`) to 4: `Cmd+K` (command palette), `Escape` (close dialogs), `Tab / Shift+Tab` (move focus), `Enter / Space` (activate focused control).
+- **CA-384**: API endpoint `<input>` in `web/src/app/(app)/settings/appearance/page.tsx` now has an associated `<label htmlFor="api-endpoint-display">` with `className="sr-only"` — screen readers announce the input purpose.
+- **CA-385**: `repoJobStatusLabel(...)` output for workflow story, learning path, and code tour each wrapped in `<div role="status" aria-live="polite">` so screen readers announce job status changes without requiring focus.
+- **CA-386**: "Generate" badge in the Explore Deeper sidebar is no longer rendered when the Generate button is visible alongside it — the badge and the button were redundant. Only the "View" badge is shown (when artifact exists); the button stands alone when it doesn't.
+- **CA-387**: Understanding stat card labels (`Nodes`, `Strategy`, `Model`, `Revision`) converted from `uppercase tracking-[0.14em]` to sentence case. `Understanding Highlights` section heading similarly converted. Matches the styling convention used in the rest of the knowledge tab.
+- **CA-388**: Code Tour evidence heading changed from "References" to "Evidence", matching the heading used in workflow story, learning path, and other artifact panels.
+- **CA-389**: "How This Works" accordion panel gains a scope-aware subheading (`Tracing from this symbol`, `Tracing from this file`, `Tracing from this module`, `Tracing from the full repository`) so the panel is self-explanatory without the breadcrumb context.
+- **CA-399**: Raw `⚠` Unicode emoji on the admin monitor page Ollama model-swap warning replaced with `<AlertTriangle>` (Lucide) — consistent sizing, theming, and ARIA treatment with other icon usage across the admin UI.
+
+#### Tests (CA-396, CA-397, CA-398)
+
+- **CA-396**: `.github/workflows/slow-tests.yml` gains a block comment explaining why the workflow is non-blocking and schedule-only: (1) slow tests take 5–20 minutes, (2) some require optional infrastructure (Ollama), (3) failures signal environment/model regressions, not build breaks.
+- **CA-397**: `storageLeakMarkers` canary test (`const expected = 9`) verified already present from CA-394 (Tier 4). Ticket closed; no code change.
+- **CA-398**: `TestWorker_SweepsOnStart` and `TestWorker_LeaderElection_OnlyOneReplicaSweeps` in `internal/trash/worker_test.go` replaced `time.Sleep(100ms)` / `time.Sleep(150ms)` with channel-based signaling. `fakeStore` gains a `swept chan struct{}` closed (once) on first `SweepExpired` call; tests wait on that channel with a 5-second safety timeout instead of sleeping.
+
 ### Known gaps (deferred from CA-320 implementation)
 
 - **H1 (CA-215 partial)**: `password_min_length` propagation is incomplete — server enforces the configured minimum and returns a clear rejection; `desktop_auth.go`, `cli/setup_admin.go`, and web `login/page.tsx`/`security/page.tsx` form validators still use the hardcoded client-side default of 8. Threading these consumers is a follow-up campaign.

@@ -1,3 +1,13 @@
+# CA-396: This workflow is intentionally scheduled (not triggered on every PR) and
+# non-blocking. Reasons:
+#   1. Slow tests (rate-limit suites, real-LLM canary, large fixture renders) routinely
+#      take 5-20 minutes and would add unacceptable latency to the PR feedback loop.
+#   2. Some slow tests make live LLM calls or require optional infrastructure (Ollama)
+#      that isn't available in the standard CI environment.
+#   3. Failures here signal environment/model regressions, not build breaks — they need
+#      operator investigation, not PR blocks.
+# To gate a PR on slow tests manually: trigger workflow_dispatch from the branch and
+# check the result before merging.
 name: slow-tests
 
 on:
