@@ -4,6 +4,24 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.13.0-rc.3...v0.13.1-rc.3) (2026-05-15)
+
+
+### Fixed
+
+* **web:** onboarding step indicator a11y, close CA-374 + CA-261, CHANGELOG (CA-380, CA-374, CA-261) ([0fcfa8a](https://github.com/sourcebridge-ai/sourcebridge/commit/0fcfa8a4002f29b53e6543574a2a49ca867e6333))
+* **web:** per-artifact CTA semantics, admin knowledge row CTA, scope subtitle (CA-375, CA-376, CA-377, CA-379) ([caeb140](https://github.com/sourcebridge-ai/sourcebridge/commit/caeb14001517e5462304612a9809f99fa1715543))
+
+
+### Changed
+
+* **code-health:** Tier-5 audit sweep — CA-330/331/332 + CA-192/194 closed ([2a9cdb5](https://github.com/sourcebridge-ai/sourcebridge/commit/2a9cdb5c91d3830c1c2af6176b2b9d74b320dfbf))
+
+
+### Documentation
+
+* CLAUDE.md — record CA-400 PostHog ctx.waitUntil fix as load-bearing constraint ([147af0e](https://github.com/sourcebridge-ai/sourcebridge/commit/147af0e8f687521af1f3dadab712bc6287ca014b))
+
 ## [0.13.0-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.12.0-rc.3...v0.13.0-rc.3) (2026-05-15)
 
 
