@@ -42,6 +42,7 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Fixed
 
+* **db:** integration test for `current_tokens_per_second` Surreal round-trip — SetProgress→GetByID (CA-170)
 * **ci:** unused qa_deps helpers, button-test types, worker import sort ([abf5e55](https://github.com/sourcebridge-ai/sourcebridge/commit/abf5e55469af512ff7a0312bae55336b2e6cc8aa))
 * **ci:** use Parameters&lt;typeof useQuery&gt;[0] instead of any for mock signature ([78c3f87](https://github.com/sourcebridge-ai/sourcebridge/commit/78c3f87a51e390e70ae687c0eb9167feea7d055c))
 * **code-health:** phase 2 — coerce helpers, joinComma deletion, UNCAPPED_SENTINEL, StoreRequirements error-return, sentinel errors, resolver dedup (CA-320) ([ab19334](https://github.com/sourcebridge-ai/sourcebridge/commit/ab193348527518537f65ad9210a9b4ac32461232))
@@ -70,6 +71,7 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Documentation
 
+* **security:** OSS multi-tenant isolation is enterprise-only by design — design decision + operator pointer (CA-157) ([docs/security/multi-tenancy-and-oss-edition.md](docs/security/multi-tenancy-and-oss-edition.md))
 * aggregate CLAUDE.md entry for 2026-05-13 audit-remediation campaign (21 C+H + 2 M co-fixes) ([c9ee1ab](https://github.com/sourcebridge-ai/sourcebridge/commit/c9ee1abdc0a07e4189d376ef272a877d1e78c2df))
 * CHANGELOG + CLAUDE.md for audit Medium cleanup campaign (CA-320) ([939e9e4](https://github.com/sourcebridge-ai/sourcebridge/commit/939e9e4dec96c10566644a5ad36f95e0e66ba302))
 * CHANGELOG + CLAUDE.md for CA-324/325/326 + gqlgen scrubber ([f5b4be4](https://github.com/sourcebridge-ai/sourcebridge/commit/f5b4be431e15a3523eadfcb72823176672ece7a6))

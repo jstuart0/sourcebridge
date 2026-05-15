@@ -172,6 +172,16 @@ Note: the validator runs at save time only. Full request-time SSRF defense
 (custom dialer with per-IP re-validation on each LLM call) is a separate
 hardening item.
 
+### Multi-tenancy
+
+The OSS edition assigns `tenant=default` to all repositories and does not enforce
+per-tenant data isolation. Every authenticated user of an OSS instance can read every
+indexed repository. If your deployment needs true tenant isolation — separate teams,
+per-team quotas, or compliance-mandated audit trails — that requires the enterprise
+edition. See [`docs/security/multi-tenancy-and-oss-edition.md`](security/multi-tenancy-and-oss-edition.md)
+for the full design decision and the list of components that make isolation non-trivial
+to add to OSS.
+
 ### Webhook Secrets (Optional)
 
 If you receive webhooks from GitHub or GitLab:

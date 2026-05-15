@@ -260,6 +260,71 @@ func TestSurrealStoreLLMProviderRoundTrip(t *testing.T) {
 	}
 }
 
+// TestLLMJobStore_CurrentTokensPerSecond_RoundTrip verifies that
+// current_tokens_per_second survives a full SurrealDB write+read cycle via
+// SetProgress → GetByID.  This closes the gap identified in CA-170: the
+// MemStore path was already covered by TestStreamProgressDriverPropagates-
+// ThroughputTPS; this test adds the Surreal integration assertion so that a
+// silent regression in the SQL SET clause (e.g., a typo in the column name or
+// an inadvertent WHERE-clause guard that drops the update) would be caught here
+// rather than at runtime in production.
+func TestLLMJobStore_CurrentTokensPerSecond_RoundTrip(t *testing.T) {
+	s := startSurrealContainer(t)
+	store := NewSurrealStore(s)
+
+	job, err := store.Create(t.Context(), newTestJob("tk-tps-1", "repo-tps-1"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Advance to generating so the SetProgress WHERE clause fires.
+	if err := store.SetStatus(t.Context(), job.ID, llm.StatusGenerating); err != nil {
+		t.Fatalf("SetStatus generating: %v", err)
+	}
+
+	// (a) Write an initial tok/s value and confirm it round-trips.
+	const firstTPS = 42.5
+	if err := store.SetProgress(t.Context(), job.ID, 0.25, "render", "first pass", firstTPS); err != nil {
+		t.Fatalf("SetProgress (first): %v", err)
+	}
+	got := store.GetByID(t.Context(), job.ID)
+	if got == nil {
+		t.Fatal("GetByID after first SetProgress returned nil")
+	}
+	if got.CurrentTokensPerSecond == 0 {
+		t.Fatalf("CurrentTokensPerSecond after first write: got 0, want %.1f", firstTPS)
+	}
+	if diff := got.CurrentTokensPerSecond - firstTPS; diff < -0.01 || diff > 0.01 {
+		t.Errorf("CurrentTokensPerSecond after first write: got %.4f, want %.4f", got.CurrentTokensPerSecond, firstTPS)
+	}
+
+	// (b) Update to a different value and confirm the new value persists.
+	const secondTPS = 87.3
+	if err := store.SetProgress(t.Context(), job.ID, 0.50, "render", "second pass", secondTPS); err != nil {
+		t.Fatalf("SetProgress (second): %v", err)
+	}
+	got2 := store.GetByID(t.Context(), job.ID)
+	if got2 == nil {
+		t.Fatal("GetByID after second SetProgress returned nil")
+	}
+	if diff := got2.CurrentTokensPerSecond - secondTPS; diff < -0.01 || diff > 0.01 {
+		t.Errorf("CurrentTokensPerSecond after second write: got %.4f, want %.4f", got2.CurrentTokensPerSecond, secondTPS)
+	}
+
+	// (c) Write zero — the pointer-vs-zero distinction in surrealLLMJob means
+	// zero should be stored and read back as exactly 0.0, not as nil.
+	if err := store.SetProgress(t.Context(), job.ID, 0.75, "render", "zero pass", 0); err != nil {
+		t.Fatalf("SetProgress (zero): %v", err)
+	}
+	got3 := store.GetByID(t.Context(), job.ID)
+	if got3 == nil {
+		t.Fatal("GetByID after zero SetProgress returned nil")
+	}
+	if got3.CurrentTokensPerSecond != 0 {
+		t.Errorf("CurrentTokensPerSecond after zero write: got %.4f, want 0.0", got3.CurrentTokensPerSecond)
+	}
+}
+
 // TestSurrealStoreProcessIDRoundTrip verifies that process_id (added in
 // migration 058, CA-175) survives a full SurrealDB round-trip through Create,
 // GetByID, and ListActive — the three paths reconcileZombieJobs depends on.
