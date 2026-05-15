@@ -89,9 +89,11 @@ const EMPTY_RESULT: UseQueryState = {
 } as UseQueryState;
 
 function setupKnowledgeQuery(artifacts: KnowledgeArtifact[]) {
-  vi.mocked(useQuery).mockImplementation((args: any) => {
-    const { variables } = args;
-    const vars = variables ?? {};
+  // urql's UseQueryArgs.variables is typed `void` for the no-variables overload,
+  // which prevents a narrow destructure-style signature here. Mock with the
+  // permissive Parameters<typeof useQuery>[0] and reach into variables manually.
+  vi.mocked(useQuery).mockImplementation((args: Parameters<typeof useQuery>[0]) => {
+    const vars = (args.variables ?? {}) as Record<string, unknown>;
     // Call 1 (KNOWLEDGE_ARTIFACTS_QUERY): has repositoryId + scopeType, NO audience/depth/entryKind
     if ("repositoryId" in vars && "scopeType" in vars && !("audience" in vars) && !("entryKind" in vars)) {
       return [
