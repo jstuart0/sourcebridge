@@ -50,6 +50,18 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "250m"
+          # CA-352: startupProbe gives Next.js up to 60s (2 + 2*29) to complete
+          # module initialization before liveness kicks in. Without this, a
+          # slow node (or a cold image pull) can trigger liveness kill-loops
+          # that repeatedly restart a perfectly healthy pod.
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 29
+            timeoutSeconds: 3
           livenessProbe:
             httpGet:
               path: /api/health

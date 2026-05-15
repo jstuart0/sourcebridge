@@ -112,6 +112,10 @@ api:
     limits:
       cpu: "1"
       memory: 1Gi
+  # -- Writable emptyDir size limit used when securityContext.readOnlyRootFilesystem=true.
+  # CA-350: /tmp is the API container's only writable path at runtime (the
+  # repo-cache PVC is mounted separately). Default: 1Gi.
+  tmpSizeLimit: 1Gi
   # -- Extra environment variables (map of NAME: value)
   env: {}
   service:
@@ -150,10 +154,22 @@ web:
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 256Mi
     limits:
       cpu: 500m
-      memory: 256Mi
+      # CA-294: Next.js standalone server (SSR + API proxy) regularly peaks
+      # above 256Mi on the first request burst after pod startup when RSC
+      # payloads are large. 512Mi is the observed safe floor for production
+      # traffic; operators with heavier SSR workloads should raise to 1Gi.
+      memory: 512Mi
+  # -- Writable emptyDir size limits used when securityContext.readOnlyRootFilesystem=true.
+  # CA-350: these values are documented here (previously rendered only from
+  # template defaults). Override per your storage requirements.
+  #   tmpSizeLimit:       /tmp  — Node.js temporary files
+  #   nextCacheSizeLimit: /app/.next/cache — Next.js ISR/RSC cache
+  # Default: 1Gi each.
+  tmpSizeLimit: 1Gi
+  nextCacheSizeLimit: 1Gi
   service:
     type: ClusterIP
     port: 3000
@@ -190,6 +206,15 @@ worker:
   # to configure LLM/embedding providers. Use this map only for overrides
   # or additional worker-specific settings.
   env: {}
+  # -- Writable emptyDir size limits used when securityContext.readOnlyRootFilesystem=true.
+  # CA-350: these values are documented here (previously rendered only from
+  # template defaults). Override per your storage and model-cache requirements.
+  #   tmpSizeLimit:   /tmp — uv-cache + HuggingFace model cache redirect
+  #   cacheSizeLimit: /var/cache/sourcebridge — workers runtime cache dir
+  # Defaults: 2Gi (tmp) + 4Gi (cache). Generous defaults for HF model cache
+  # and uv wheel cache; reduce on clusters with tight ephemeral storage quotas.
+  tmpSizeLimit: 2Gi
+  cacheSizeLimit: 4Gi
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -198,6 +223,14 @@ worker:
   shutdownGraceSeconds: 3600
   maxSurge: 1
   maxUnavailable: 0
+  # -- PodDisruptionBudget settings (CA-353)
+  podDisruptionBudget:
+    # -- When true, creates a PDB with minAvailable=1 so voluntary disruptions
+    # (node drain, cluster upgrades) cannot take the worker offline while a
+    # long-running knowledge-generation job is in progress.
+    # Operator note: with replicas:1 this blocks node drains indefinitely;
+    # use --timeout on drain or temporarily disable before maintenance.
+    enabled: true
 
 # ─── SurrealDB ───────────────────────────────────────────────────────
 surrealdb:

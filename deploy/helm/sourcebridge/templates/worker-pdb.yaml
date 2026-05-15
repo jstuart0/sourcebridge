@@ -1,0 +1,24 @@
+{{- if .Values.worker.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-worker-pdb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.worker.labels" . | nindent 4 }}
+# CA-353: mirrors the kustomize base worker-pdb.yaml. Voluntary disruptions
+# (node drain, cluster upgrade) cannot evict the worker if doing so would
+# drop the pod count below 1. The worker runs long-running knowledge-generation
+# jobs (up to 65 minutes); a forced eviction mid-job is exactly the scenario
+# terminationGracePeriodSeconds was designed to avoid, but a PDB also blocks
+# voluntary disruption windows.
+#
+# Operator note: with replicas:1 the PDB will block node drains indefinitely
+# unless the drain command specifies --pod-selector or --timeout. Document
+# the trade-off in your runbook before scheduling maintenance windows.
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "sourcebridge.worker.selectorLabels" . | nindent 6 }}
+{{- end }}

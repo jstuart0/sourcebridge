@@ -59,6 +59,17 @@ spec:
               value: "http://{{ include "sourcebridge.fullname" . }}-api:{{ .Values.api.service.port }}"
             - name: SOURCEBRIDGE_WEB_DEV_PROXY
               value: "http://{{ include "sourcebridge.fullname" . }}-api:{{ .Values.api.service.port }}"
+          # CA-352: startupProbe gives Next.js up to 60s (2 + 2*29) to complete
+          # module initialization before liveness/readiness kick in. Without
+          # this, a slow node or cold image pull triggers liveness kill-loops.
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 29
+            timeoutSeconds: 3
           # otto Medium #13: /api/health is lighter than / (no full SSR render)
           # and correctly tests the API proxy path — the page may render from
           # cache even when the upstream API is unreachable. Matches k8s base.
