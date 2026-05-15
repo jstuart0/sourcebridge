@@ -374,6 +374,29 @@ export default function RepositoryDetailPage() {
     });
   }
 
+  // --- Loading-state guard sequence (CA-332) ---------------------------------
+  // This component has three distinct pre-render exit points; their ordering is
+  // load-bearing and must not be changed:
+  //
+  //   1. fetching (repoResult.fetching=true)
+  //      URQL is in-flight. Show the structural skeleton so layout shift is
+  //      minimal. We may still have stale `repo` data from a prior cache hit;
+  //      we ignore it and prefer the skeleton to avoid flicker on re-fetch.
+  //
+  //   2. error + no data (repoResult.error && !repo)
+  //      The query failed and there is no cached data to fall back on (500,
+  //      auth failure, network down). Show a retry card. Must come BEFORE the
+  //      !repo guard so we can distinguish "server error" from "genuine 404".
+  //
+  //   3. no data after a successful fetch (!repo, no error)
+  //      The query succeeded but the record is absent — genuine 404 (removed
+  //      or bad link). Show the "not found" empty state.
+  //
+  // The case (repoResult.error && repo) — error on re-fetch but stale data
+  // available — intentionally falls through to the normal render so the UI
+  // stays functional with the cached repo while the user decides to retry.
+  // ---------------------------------------------------------------------------
+
   if (repoResult.fetching) {
     return (
       <PageFrame>

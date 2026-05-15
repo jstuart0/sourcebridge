@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexing/pathutil"
@@ -198,7 +199,7 @@ func (s *qaSymbolLookup) SymbolContext(ctx context.Context, id string) string {
 	if sym.DocComment != "" {
 		parts = append(parts, sym.DocComment)
 	}
-	return joinLines(parts)
+	return strings.Join(parts, "\n")
 }
 
 func (s *qaSymbolLookup) SymbolFilePath(ctx context.Context, id string) string {
@@ -293,20 +294,6 @@ func safeJoinRepoPath(repoRoot, relPath string) (string, error) {
 	return pathutil.SafeJoinRepoPath(repoRoot, relPath)
 }
 
-func joinLines(ps []string) string {
-	var total int
-	for _, p := range ps {
-		total += len(p) + 1
-	}
-	b := make([]byte, 0, total)
-	for i, p := range ps {
-		if i > 0 {
-			b = append(b, '\n')
-		}
-		b = append(b, p...)
-	}
-	return string(b)
-}
 
 // qaSearcher adapts the hybrid retrieval service to qa.Searcher. The
 // bridge is narrow on purpose — internal/qa doesn't know about

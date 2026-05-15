@@ -244,7 +244,17 @@ func (s *SurrealLLMConfigStore) LoadLLMConfigVersion(ctx context.Context) (uint6
 	if db == nil {
 		return 0, fmt.Errorf("database not connected")
 	}
-	raw, err := surrealdb.Query[[]map[string]interface{}](ctx, db,
+	// CA-330: use the typed surrealLLMConfig DTO (same as LoadLLMConfig) so the
+	// compiler catches field drift — the ad-hoc map[string]interface{} decode
+	// was flagged by the D-M1 audit finding. Only the Version field is used here;
+	// the rest of the DTO is decoded but discarded, which is cheap for a single
+	// SELECT version query.
+	//
+	// surrealdb.Query returns a non-nil error only on transport/protocol failures;
+	// an absent row returns nil error with an empty result set, so we use the raw
+	// Query form (not queryOne) to preserve the "row absent → return 0, nil" path
+	// while still decoding into the typed DTO.
+	raw, err := surrealdb.Query[[]surrealLLMConfig](ctx, db,
 		"SELECT version FROM ca_llm_config WHERE id = type::thing('ca_llm_config', 'default') LIMIT 1",
 		map[string]any{})
 	if err != nil {
@@ -260,12 +270,7 @@ func (s *SurrealLLMConfigStore) LoadLLMConfigVersion(ctx context.Context) (uint6
 	if len(qr.Result) == 0 {
 		return 0, nil
 	}
-	row := qr.Result[0]
-	v, ok := row["version"]
-	if !ok {
-		return 0, nil
-	}
-	return coerceUint64(v), nil
+	return qr.Result[0].Version, nil
 }
 
 func (s *SurrealLLMConfigStore) SaveLLMConfig(ctx context.Context, rec *LLMConfigRecord) error {
