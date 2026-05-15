@@ -91,23 +91,33 @@ func (r *mutationResolver) dispatchDiscussThroughOrchestrator(ctx context.Contex
 	// produced no text, surface an explicit message so callers always
 	// receive either a real answer or an explanation of why one wasn't
 	// produced.
-	if out.Answer == "" {
-		if res.Diagnostics.FallbackUsed != "" {
-			// C1: pipeline signalled a degraded path (e.g. worker_unavailable,
-			// understanding_partial, synthesis_failed). Surface the reason.
-			out.Answer = fmt.Sprintf(
-				"Discussion synthesis returned no answer (reason: %s). %d source(s) gathered — see references list for context.",
-				res.Diagnostics.FallbackUsed, len(out.References),
-			)
-		} else {
-			// C2: truly silent path — worker returned an empty answer with no
-			// diagnostic signal. Surface a generic explanation.
-			out.Answer = fmt.Sprintf(
-				"Discussion synthesis completed but returned an empty answer. %d source(s) gathered — see references list for context.",
-				len(out.References),
-			)
-		}
-	}
+	applyEmptyAnswerGuard(res, out)
 
 	return out, nil
+}
+
+// applyEmptyAnswerGuard applies Fix C (CA-324) to out in-place:
+// when Answer is empty it substitutes a human-readable explanation
+// sourced from either the fallback reason (C1) or a generic message (C2).
+// Extracted so the guard can be unit-tested independently of the full
+// orchestrator round-trip (CA-392 / T-M1).
+func applyEmptyAnswerGuard(res *qa.AskResult, out *DiscussionResult) {
+	if out.Answer != "" {
+		return
+	}
+	if res.Diagnostics.FallbackUsed != "" {
+		// C1: pipeline signalled a degraded path (e.g. worker_unavailable,
+		// understanding_partial, synthesis_failed). Surface the reason.
+		out.Answer = fmt.Sprintf(
+			"Discussion synthesis returned no answer (reason: %s). %d source(s) gathered — see references list for context.",
+			res.Diagnostics.FallbackUsed, len(out.References),
+		)
+	} else {
+		// C2: truly silent path — worker returned an empty answer with no
+		// diagnostic signal. Surface a generic explanation.
+		out.Answer = fmt.Sprintf(
+			"Discussion synthesis completed but returned an empty answer. %d source(s) gathered — see references list for context.",
+			len(out.References),
+		)
+	}
 }

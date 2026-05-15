@@ -382,38 +382,52 @@ func parseToolText(resp jsonRPCResponse) (string, bool) {
 func TestMCP_SSEConnection(t *testing.T) {
 	h := newTestHarness(t)
 
-	// Create a fake authenticated request with a cancellable context.
-	// Cancel the context to make handleSSE exit, then read the recorder
-	// after the handler goroutine finishes — avoids the data race.
+	// Use io.Pipe so the SSE handler can write concurrently while we scan for
+	// the initial endpoint event without a data race. This matches the pattern
+	// used in TestMCP_FullHTTPFlow. CA-393 / T-M2: replaces time.Sleep(50ms).
+	pr, pw := io.Pipe()
+	hdr := make(http.Header)
+
 	req := httptest.NewRequest("GET", "/api/v1/mcp/sse", nil)
 	ctx, cancel := context.WithCancel(req.Context())
+	defer cancel()
 	ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{UserID: "user-1"})
 	req = req.WithContext(ctx)
 
-	rr := httptest.NewRecorder()
-
-	// Run handleSSE in a goroutine since it blocks
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.handler.handleSSE(rr, req)
+		defer pw.Close()
+		h.handler.handleSSE(&pipeResponseWriter{header: hdr, pw: pw}, req)
 	}()
 
-	// Give it a moment to write the initial endpoint event, then cancel
-	time.Sleep(50 * time.Millisecond)
+	// Scan lines until we see the endpoint event — deterministic, no sleep needed.
+	scanner := bufio.NewScanner(pr)
+	var gotEndpoint bool
+	var gotSessionURL bool
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "event: endpoint") {
+			gotEndpoint = true
+		}
+		if strings.Contains(line, "/api/v1/mcp/message?sessionId=") {
+			gotSessionURL = true
+		}
+		if gotEndpoint && gotSessionURL {
+			break
+		}
+	}
 	cancel()
+	go io.Copy(io.Discard, pr) //nolint:errcheck
 	<-done
 
-	// Now safe to read — the handler goroutine has exited
-	if ct := rr.Header().Get("Content-Type"); ct != "text/event-stream" {
+	if ct := hdr.Get("Content-Type"); ct != "text/event-stream" {
 		t.Errorf("expected Content-Type text/event-stream, got %q", ct)
 	}
-
-	body := rr.Body.String()
-	if !strings.Contains(body, "event: endpoint") {
+	if !gotEndpoint {
 		t.Error("expected 'event: endpoint' in SSE stream")
 	}
-	if !strings.Contains(body, "/api/v1/mcp/message?sessionId=") {
+	if !gotSessionURL {
 		t.Error("expected endpoint URL with sessionId in SSE stream")
 	}
 }
@@ -1423,22 +1437,33 @@ func TestMCP_NotificationIgnored(t *testing.T) {
 func TestMCP_SessionCleanup(t *testing.T) {
 	h := newTestHarness(t)
 
-	// Create a session via SSE, then cancel the request context
+	// Create a session via SSE, then cancel the request context.
+	// CA-393 / T-M2: use a pipe + scan to wait deterministically for the session
+	// to be registered (handleSSE calls sessionStore.Save before writing the
+	// endpoint event) instead of time.Sleep(50ms).
+	pr, pw := io.Pipe()
+
 	req := httptest.NewRequest("GET", "/api/v1/mcp/sse", nil)
 	ctx, cancel := context.WithCancel(req.Context())
 	ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{UserID: "user-1"})
 	req = req.WithContext(ctx)
 
-	rr := httptest.NewRecorder()
-
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.handler.handleSSE(rr, req)
+		defer pw.Close()
+		h.handler.handleSSE(&pipeResponseWriter{header: make(http.Header), pw: pw}, req)
 	}()
 
-	// Wait for session to be created
-	time.Sleep(50 * time.Millisecond)
+	// Wait until the endpoint event is written — that proves handleSSE has
+	// already called sessionStore.Save and localChans.Store before this point.
+	scanner := bufio.NewScanner(pr)
+	for scanner.Scan() {
+		if strings.Contains(scanner.Text(), "event: endpoint") {
+			break
+		}
+	}
+	go io.Copy(io.Discard, pr) //nolint:errcheck
 
 	// Should have 1 session
 	count := h.handler.sessionCount()
@@ -1580,9 +1605,9 @@ func TestMCP_FullHTTPFlow(t *testing.T) {
 		t.Errorf("expected 202, got %d", msgRR.Code)
 	}
 
-	time.Sleep(20 * time.Millisecond)
-
-	// Verify session is now initialized
+	// CA-393 / T-M2: no sleep needed. handleMessage calls sessionStore.Save
+	// synchronously before returning 202, so the Initialized flag is already
+	// persisted by the time we reach this assertion.
 	state, err := h.handler.sessionStore.Get(context.Background(), sessionID)
 	if err != nil || state == nil {
 		t.Fatal("session not found")

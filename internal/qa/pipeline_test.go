@@ -174,6 +174,60 @@ func TestOrchestrator_SerializesConversationHistory(t *testing.T) {
 	}
 }
 
+// TestResolveAskModel_ResolverWinsOverStaticConfig pins the precedence in
+// resolveAskModel (CA-395 / T-M4): when AskModelResolver returns a non-empty
+// value it must take precedence over the static AskModel field. Without this
+// test, silently inverting the precedence check or short-circuiting the resolver
+// call would leave the live-profile model unused across all callers.
+func TestResolveAskModel_ResolverWinsOverStaticConfig(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig()
+	cfg.AskModel = "static-model"
+	cfg.AskModelResolver = func(_ context.Context) string { return "live-model" }
+	o := New(nil, nil, nil, cfg)
+	if got := o.resolveAskModel(context.Background()); got != "live-model" {
+		t.Errorf("expected resolver value 'live-model', got %q", got)
+	}
+}
+
+// TestResolveAskModel_ResolverEmptyFallsBackToStatic pins that when
+// AskModelResolver returns "" the helper falls back to AskModel.
+func TestResolveAskModel_ResolverEmptyFallsBackToStatic(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig()
+	cfg.AskModel = "static-model"
+	cfg.AskModelResolver = func(_ context.Context) string { return "" }
+	o := New(nil, nil, nil, cfg)
+	if got := o.resolveAskModel(context.Background()); got != "static-model" {
+		t.Errorf("expected static fallback 'static-model', got %q", got)
+	}
+}
+
+// TestResolveAskModel_NilResolverFallsBackToStatic pins that when AskModelResolver
+// is nil the helper falls back to the static AskModel field without panicking.
+func TestResolveAskModel_NilResolverFallsBackToStatic(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig()
+	cfg.AskModel = "only-static"
+	cfg.AskModelResolver = nil
+	o := New(nil, nil, nil, cfg)
+	if got := o.resolveAskModel(context.Background()); got != "only-static" {
+		t.Errorf("expected static model 'only-static', got %q", got)
+	}
+}
+
+// TestResolveAskModel_BothEmpty returns empty string when neither field is set.
+func TestResolveAskModel_BothEmpty(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig()
+	cfg.AskModel = ""
+	cfg.AskModelResolver = nil
+	o := New(nil, nil, nil, cfg)
+	if got := o.resolveAskModel(context.Background()); got != "" {
+		t.Errorf("expected empty string when nothing configured, got %q", got)
+	}
+}
+
 func TestBuildPromptEnvelope_DelimitsContext(t *testing.T) {
 	p := buildPromptEnvelope(
 		AskInput{Question: "how does X work?"},

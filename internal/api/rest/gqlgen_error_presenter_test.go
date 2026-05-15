@@ -81,11 +81,15 @@ func TestLooksLikeStorageLeak_TableNameRegex(t *testing.T) {
 		want bool
 	}{
 		{"surrealdb query failed", true},
+		{"surreal db returned null", true},
 		{"thing(ca_requirement:foo)", true},
+		{"query failed: constraint violation", true},
 		{"failed to scan ca_local_auth record", true},
 		{"rpc error: code = Unavailable", true},
 		{"rocksdb: CompactionFiltered", true},
 		{"cbor: cannot decode", true},
+		{"BEGIN TRANSACTION failed: deadlock", true},
+		{"db: read error at offset 42", true},
 		{"repository not found", false},
 		{"invalid input", false},
 		{"requirement title required", false},
@@ -94,5 +98,24 @@ func TestLooksLikeStorageLeak_TableNameRegex(t *testing.T) {
 		if got := looksLikeStorageLeak(strings.ToLower(c.msg)); got != c.want {
 			t.Errorf("looksLikeStorageLeak(%q) = %v, want %v", c.msg, got, c.want)
 		}
+	}
+}
+
+// TestStorageLeakMarkers_CountCanary pins the length of storageLeakMarkers
+// (CA-394 / T-M3). If this test fails, a maintainer added or removed a marker.
+// Intent must be signalled by updating this count AND adding or removing the
+// corresponding test case in TestLooksLikeStorageLeak_TableNameRegex above.
+//
+// Rule from CLAUDE.md: "a new storage layer (Cassandra, etc.) needs a new
+// marker added to storageLeakMarkers."
+func TestStorageLeakMarkers_CountCanary(t *testing.T) {
+	const expected = 9
+	if got := len(storageLeakMarkers); got != expected {
+		t.Fatalf(
+			"storageLeakMarkers count changed from %d to %d — "+
+				"if intentional, update this canary AND add/remove the "+
+				"matching test case in TestLooksLikeStorageLeak_TableNameRegex",
+			expected, got,
+		)
 	}
 }

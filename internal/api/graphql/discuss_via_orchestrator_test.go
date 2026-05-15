@@ -156,6 +156,88 @@ func TestDispatchDiscuss_EmptyAnswerSilentPath(t *testing.T) {
 	}
 }
 
+// TestApplyEmptyAnswerGuard_C1_FallbackReason directly tests Fix C1 (CA-324 /
+// CA-392): when Answer is empty and FallbackUsed is set, applyEmptyAnswerGuard
+// must surface the reason in the answer text. This pins the guard independently
+// of qa.Orchestrator (which previously prevented direct injection of an AskResult
+// with FallbackUsed set and an empty Answer at the same time).
+func TestApplyEmptyAnswerGuard_C1_FallbackReason(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		fallbackUsed string
+		wantContains string
+	}{
+		{
+			name:         "worker_unavailable",
+			fallbackUsed: "worker_unavailable",
+			wantContains: "worker_unavailable",
+		},
+		{
+			name:         "understanding_not_ready",
+			fallbackUsed: "understanding_not_ready",
+			wantContains: "understanding_not_ready",
+		},
+		{
+			name:         "synthesis_failed",
+			fallbackUsed: "synthesis_failed",
+			wantContains: "synthesis_failed",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			res := &qa.AskResult{
+				Diagnostics: qa.AskDiagnostics{FallbackUsed: c.fallbackUsed},
+			}
+			out := &DiscussionResult{Answer: "", References: []string{}}
+			applyEmptyAnswerGuard(res, out)
+			if out.Answer == "" {
+				t.Fatal("C1: applyEmptyAnswerGuard must not leave Answer empty when FallbackUsed is set")
+			}
+			if !strings.Contains(out.Answer, c.wantContains) {
+				t.Errorf("C1: expected answer to contain %q, got: %q", c.wantContains, out.Answer)
+			}
+		})
+	}
+}
+
+// TestApplyEmptyAnswerGuard_C2_SilentPath directly tests Fix C2 (CA-324):
+// when Answer is empty and FallbackUsed is empty, applyEmptyAnswerGuard must
+// surface the generic "synthesis completed but returned an empty answer" message.
+func TestApplyEmptyAnswerGuard_C2_SilentPath(t *testing.T) {
+	t.Parallel()
+	res := &qa.AskResult{
+		Diagnostics: qa.AskDiagnostics{FallbackUsed: ""},
+	}
+	out := &DiscussionResult{Answer: "", References: []string{}}
+	applyEmptyAnswerGuard(res, out)
+	if out.Answer == "" {
+		t.Fatal("C2: applyEmptyAnswerGuard must not leave Answer empty on silent path")
+	}
+	if !strings.Contains(out.Answer, "synthesis") {
+		t.Errorf("C2: expected 'synthesis' in answer, got: %q", out.Answer)
+	}
+	if !strings.Contains(out.Answer, "empty") {
+		t.Errorf("C2: expected 'empty' in answer, got: %q", out.Answer)
+	}
+}
+
+// TestApplyEmptyAnswerGuard_PassThrough verifies that applyEmptyAnswerGuard is a
+// no-op when the Answer is already non-empty — real answers must not be replaced.
+func TestApplyEmptyAnswerGuard_PassThrough(t *testing.T) {
+	t.Parallel()
+	want := "A concrete, non-empty answer from the synthesizer."
+	res := &qa.AskResult{
+		Diagnostics: qa.AskDiagnostics{FallbackUsed: "understanding_partial"},
+	}
+	out := &DiscussionResult{Answer: want, References: []string{}}
+	applyEmptyAnswerGuard(res, out)
+	if out.Answer != want {
+		t.Errorf("PassThrough: real answer was replaced; got %q, want %q", out.Answer, want)
+	}
+}
+
 // TestDispatchDiscuss_RealAnswerPassedThrough verifies that when the synthesizer
 // returns a real answer, it is not replaced by the Fix C fallback messages.
 func TestDispatchDiscuss_RealAnswerPassedThrough(t *testing.T) {
