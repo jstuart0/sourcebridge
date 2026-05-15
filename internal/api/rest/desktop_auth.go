@@ -223,6 +223,16 @@ func (s *Server) handleDesktopLocalLogin(w http.ResponseWriter, r *http.Request)
 		http.Error(w, `{"error":"password is required"}`, http.StatusBadRequest)
 		return
 	}
+
+	// CA-339 / CA-207: same per-username gate as handleLogin. The desktop
+	// local-login endpoint shares the same loginLimiter instance so attempts
+	// across both paths consume from the same per-username budget.
+	const loginUsername = "admin@localhost"
+	if s.loginLimiter != nil && !s.loginLimiter.Allow(loginUsername) {
+		s.loginLimiter.WriteRejection(w)
+		return
+	}
+
 	if _, err := s.localAuth.Login(req.Password); err != nil {
 		if !s.localAuth.IsSetupDone() {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not set up"})

@@ -71,7 +71,10 @@ func NewLocalAuthWithOptions(jwtManager *JWTManager, opts LocalAuthOptions, pers
 	} else if user != nil {
 		la.user = user
 		la.setupDone = true
-		slog.Info("loaded persisted admin user", "email", user.Email)
+		// CA-340: email is PII — log at Debug to avoid emitting it in production
+		// INFO-level log streams. The user.ID is the stable identifier for correlation.
+		slog.Debug("loaded persisted admin user", "user_id", user.ID)
+		slog.Info("local_auth_setup_loaded", "user_id", user.ID)
 	}
 
 	return la

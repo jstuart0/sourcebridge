@@ -190,7 +190,10 @@ func (o *OIDCProvider) Exchange(ctx context.Context, state, code string) (string
 		claims.Email = claims.Sub + "@oidc"
 	}
 
-	slog.Info("OIDC login successful", "email", claims.Email, "sub", claims.Sub)
+	// CA-340: email is PII — log at Debug only, not INFO. The opaque sub claim
+	// is the stable identifier; operators can correlate users via sub in debug
+	// logs without emitting email addresses to production log aggregators.
+	slog.Debug("oidc_login_success", "email", claims.Email, "sub", claims.Sub)
 	appliedRole := normalizeOIDCRole(claims.Role)
 	if appliedRole != claims.Role {
 		slog.Warn("oidc_role_normalized",

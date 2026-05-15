@@ -324,6 +324,11 @@ type Server struct {
 	workerVersionLookup        *versionLookup         // best-effort cache for worker GetVersion (CA-136)
 	gateSnapshotCache          gateSnapshotCache      // 1-second TTL cache for worker gate snapshot (Phase 7)
 
+	// loginLimiter is the per-username rate limiter for local-auth login endpoints.
+	// Constructed once at NewServer time from cfg.Auth.LoginRateLimitPerUser and
+	// cfg.Auth.LoginRateLimitWindowSecs. CA-339 / CA-207.
+	loginLimiter *loginRateLimiter
+
 	// encryptionKeySet is true when the API booted with a resolved encryption
 	// key. Surfaced on GET /api/v1/admin/llm-profiles via AppDeps.EncryptionKeySet.
 	encryptionKeySet bool
@@ -738,6 +743,24 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		// LivingWikiAuditLog: enterprise-only; not stored on Server; left nil
 		// here (enterprise routes or tests may set it on the resolver directly).
 		s.Deps.QA = s.qaResolverOrchestrator()
+	}
+
+	// Per-username login rate limiter (CA-339 / CA-207). Constructed here so
+	// the same limiter instance is shared between handleLogin and
+	// handleDesktopLocalLogin. When LoginRateLimitPerUser==0 the limiter is a
+	// no-op that always returns true.
+	{
+		limit := 5
+		windowSecs := 300
+		if cfg != nil {
+			if cfg.Auth.LoginRateLimitPerUser >= 0 {
+				limit = cfg.Auth.LoginRateLimitPerUser
+			}
+			if cfg.Auth.LoginRateLimitWindowSecs > 0 {
+				windowSecs = cfg.Auth.LoginRateLimitWindowSecs
+			}
+		}
+		s.loginLimiter = newLoginRateLimiter(limit, time.Duration(windowSecs)*time.Second)
 	}
 
 	s.setupRouter()

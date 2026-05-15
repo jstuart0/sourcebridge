@@ -73,6 +73,12 @@ func TestServerStructureCanary(t *testing.T) {
 		"workerVersionLookup":    true,
 		"gateSnapshotCache":      true,
 
+		// loginLimiter: per-username login rate limiter for local-auth endpoints.
+		// Constructed once at NewServer time. Not a subsystem dependency — it's a
+		// small in-process sliding-window bucket and doesn't belong in AppDeps.
+		// CA-339 / CA-207.
+		"loginLimiter": true,
+
 		// encryptionKeySet: wiring-time bool; stays on Server for the
 		// WithEncryptionKeySet option pattern; written to s.Deps at boot.
 		"encryptionKeySet": true,

@@ -24,6 +24,26 @@ type AuthConfig struct {
 	// Config key: auth.password_min_length
 	// Env var:    SOURCEBRIDGE_AUTH_PASSWORD_MIN_LENGTH
 	PasswordMinLength int `mapstructure:"password_min_length"`
+
+	// LoginRateLimitPerUser caps the number of local-auth login attempts
+	// per username within LoginRateLimitWindowSecs seconds. Default 5 attempts
+	// per 300 seconds (5 minutes). Set to 0 to disable the per-username gate.
+	//
+	// This is IP-transparent: attempts from different source IPs targeting the
+	// same account all consume from the same bucket. Complements the existing
+	// per-IP httprate.LimitByIP middleware (CA-339 / CA-207).
+	//
+	// Config key: auth.login_rate_limit_per_user
+	// Env var:    SOURCEBRIDGE_AUTH_LOGIN_RATE_LIMIT_PER_USER
+	LoginRateLimitPerUser int `mapstructure:"login_rate_limit_per_user"`
+
+	// LoginRateLimitWindowSecs is the sliding-window duration in seconds for
+	// the per-username login rate limit. Default 300 (5 minutes). Must be > 0
+	// when LoginRateLimitPerUser > 0.
+	//
+	// Config key: auth.login_rate_limit_window_secs
+	// Env var:    SOURCEBRIDGE_AUTH_LOGIN_RATE_LIMIT_WINDOW_SECS
+	LoginRateLimitWindowSecs int `mapstructure:"login_rate_limit_window_secs"`
 }
 
 // Config holds the complete application configuration.
@@ -855,7 +875,9 @@ func Defaults() *Config {
 			AllowPrivateBaseURL: true,
 		},
 		Auth: AuthConfig{
-			PasswordMinLength: 8, // CA-215: default 8 preserves current behavior
+			PasswordMinLength:        8,   // CA-215: default 8 preserves current behavior
+			LoginRateLimitPerUser:    5,   // CA-339/CA-207: 5 attempts per window
+			LoginRateLimitWindowSecs: 300, // CA-339/CA-207: 5-minute sliding window
 		},
 		Linking: LinkingConfig{
 			MinConfidenceUI:        0.5,
@@ -1046,6 +1068,8 @@ func Load() (*Config, error) {
 	v.SetDefault("indexing.allow_private_git_hosts", false)
 	v.SetDefault("llm.allow_private_base_url", true)
 	v.SetDefault("auth.password_min_length", cfg.Auth.PasswordMinLength)
+	v.SetDefault("auth.login_rate_limit_per_user", cfg.Auth.LoginRateLimitPerUser)
+	v.SetDefault("auth.login_rate_limit_window_secs", cfg.Auth.LoginRateLimitWindowSecs)
 	v.SetDefault("change_watch.enabled", cfg.ChangeWatch.Enabled)
 	v.SetDefault("change_watch.debounce_ms", cfg.ChangeWatch.DebounceMs)
 	v.SetDefault("change_watch.rate_limit_per_min", cfg.ChangeWatch.RateLimitPerMin)
