@@ -24,6 +24,25 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-15 Tier 1 security Mediums: CSP tightening + per-username login rate limit + OIDC/local PII scrub (CA-337, CA-338, CA-339, CA-207, CA-340)** — 2 commits.
+
+CA-337 DEFERRED. Next.js 15 streaming RSC injects `self.__next_f.push(...)` inline scripts into every SSR page; `unsafe-inline` in `script-src` is mandatory until a nonce-based refactor lands. Residual documented in `web/next.config.ts` and CHANGELOG.
+
+CA-338 shipped: bare `wss:` / `ws:` scheme tokens removed from `connect-src` in `web/next.config.ts`; replaced with `'self'` (production) + `ws://localhost:* wss://localhost:*` (dev builds only via `process.env.NODE_ENV === "development"`). `trimEnd()` guards the case where no dev origins are injected from leaving a trailing space.
+
+CA-339 + CA-207 shipped: `internal/api/rest/login_rate_limit.go` — `loginRateLimiter` with `sync.Map` of `*loginBucket` (sliding-window timestamp slice). Shared instance on `rest.Server.loginLimiter`; wired into both `handleLogin` (`auth.go`) and `handleDesktopLocalLogin` (`desktop_auth.go`). Config: `auth.login_rate_limit_per_user` (default 5) + `auth.login_rate_limit_window_secs` (default 300). Both viper-defaulted + struct-defaulted in `internal/config/config.go:AuthConfig`. `TestServerStructureCanary` allowlisted `loginLimiter` with comment.
+
+CA-340 shipped: `slog.Info("OIDC login successful", "email", ...)` at `internal/auth/oidc.go:193` demoted to `slog.Debug` (email is PII). `slog.Info("loaded persisted admin user", "email", ...)` at `internal/auth/local.go:74` demoted to `slog.Debug`; new `slog.Info("local_auth_setup_loaded", "user_id", ...)` emitted without email.
+
+Load-bearing constraints for future-Claude:
+
+- **CA-337 residual: `unsafe-inline` in `script-src` is NOT removable without a nonce refactor.** Next.js 15 RSC streaming always injects inline scripts (`self.__next_f.push([...])`). Attempting to remove `unsafe-inline` without nonce-prop wiring will silently break hydration on all pages. The deferred path: (1) generate a per-request nonce in `web/src/middleware.ts`, (2) pass it to the Next.js `<script>` elements via the `nonce` prop, (3) include `'nonce-<value>'` in `script-src`. Until that's done, the residual comment in `web/next.config.ts` is load-bearing documentation.
+- **CA-338: `connect-src` `'self'` covers same-origin WebSockets.** The CSP spec includes WebSocket connections in `connect-src`; `'self'` allows `wss://same-host` in production. Any future feature that needs cross-origin WebSocket connections (e.g., connecting to a remote Ollama) must explicitly add the origin to `connect-src`, not revert to bare `wss:`.
+- **`loginRateLimiter.Allow()` is called BEFORE the bcrypt comparison** in both login handlers. This is the constant-time safety property — the 429 response time is independent of whether the account has a valid password. Do not re-order to "skip the rate check for obviously wrong passwords first." That would create a timing oracle distinguishing lockout-on-valid-account from lockout-on-invalid-account.
+- **`loginLimiter` is a shared instance across `/auth/login` and `/auth/desktop/local-login`.** Both paths consume from the same per-username budget. If you add a third login endpoint (e.g., `/auth/api-key-login`), wire `s.loginLimiter.Allow(...)` there too or it becomes an unguarded side door.
+- **`const loginUsername = "admin@localhost"` is the OSS-local-auth key.** For multi-user/enterprise extensions that add username-based login, replace this constant with the actual submitted username so each account gets its own bucket. The current constant is correct for OSS single-user local-auth only.
+- **CA-340: `slog.Debug` with `email` is intentional** at `internal/auth/oidc.go` and `internal/auth/local.go`. Operators who need email correlation for troubleshooting can enable debug logging. Don't elevate back to INFO — that re-introduces PII in default production log streams. The `sub` / `user_id` fields at INFO level are the stable opaque identifiers.
+
 **2026-05-14 telemetry metrics expansion (CA-400)** — 3 commits across 3 repos: `7824873` + `81cef10` (collector), `86330d1` (agent), `v32` nginx image (marketing site).
 Adds engagement metrics — repos indexed, queries asked, artifacts generated — to the telemetry pipeline end-to-end. Three coordinated changes: (1) collector `sourcebridge-telemetry/src/worker.ts` adds 9 new `/v1/stats` aggregations; (2) agent adds `internal/usage/` package with `RollingDayCounter` primitive and wires `QueriesCounter` / `ArtifactsCounter` into the telemetry ping; (3) marketing site `sourcebridge-website/index.html` switches its stats bar to the new cohort-filtered keys.
 

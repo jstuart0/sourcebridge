@@ -23,18 +23,33 @@ const nextConfig: NextConfig = {
     // so the API's JSON-API CSP does not leak into web HTML responses. This
     // headers() function sets the web UI's own CSP (HTML pages + Next.js assets).
     //
-    // 'unsafe-inline' on script-src is required by Next.js hydration scripts
-    // (chunk loaders, runtime config). Migration to nonce-based CSP is a
-    // separate ticket.
+    // CA-337 DEFERRED: 'unsafe-inline' on script-src is required by Next.js 15
+    // streaming RSC hydration. The runtime inserts `self.__next_f.push(...)` inline
+    // scripts into every SSR HTML page; removing 'unsafe-inline' breaks hydration.
+    // The correct fix is nonce-based CSP (generate a nonce per-request in
+    // middleware.ts, pass it to Next.js via the `nonce` prop, add it to CSP headers).
+    // That refactor is a separate 1.0 ticket — tracking as CA-337.
+    //
+    // CA-338: restrict wss:/ws: in connect-src to same-origin instead of allowing
+    // the entire wss: / ws: scheme globally. In production, WebSocket connections
+    // are same-origin. In dev, Next.js HMR uses ws://localhost:<port>; we allow
+    // ws://localhost:* only for development builds.
     const posthogHost =
       process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com";
+    const isDev = process.env.NODE_ENV === "development";
+    // In dev mode, allow HMR WebSocket connections from localhost on any port.
+    // In production, 'self' covers same-origin wss: connections (SSE + WS).
+    const wsOrigins = isDev ? `ws://localhost:* wss://localhost:*` : ``;
     const cspDirectives = [
       `default-src 'self'`,
       `script-src 'self' 'unsafe-inline'`,
       `style-src 'self' 'unsafe-inline'`,
       `img-src 'self' data: blob:`,
-      // wss: + ws: cover SSE/WebSocket connections (dev HMR + production EventSource)
-      `connect-src 'self' wss: ws: ${posthogHost}`,
+      // CA-338: pin WebSocket/SSE connections to same-origin (+ localhost in dev).
+      // Bare 'wss:' / 'ws:' scheme tokens were removed — they allowed connecting
+      // to any host on those schemes, which is unnecessary and expands the
+      // exfiltration surface.
+      `connect-src 'self' ${wsOrigins} ${posthogHost}`.trimEnd(),
       `font-src 'self' data:`,
       `form-action 'self'`,
       `frame-ancestors 'none'`,
