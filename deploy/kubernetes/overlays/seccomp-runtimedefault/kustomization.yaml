@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# CA-360: add seccompProfile: RuntimeDefault to every Deployment pod spec.
+#
+# RuntimeDefault delegates syscall filtering to the container runtime's
+# default seccomp profile (Docker/containerd ship sensible defaults that
+# block ~40 rarely-needed syscalls). This is the lowest-risk seccomp
+# posture — no custom profile to maintain, widely supported since
+# Kubernetes 1.27 / Linux kernel 3.17.
+#
+# Apply:  kubectl apply -k deploy/kubernetes/overlays/seccomp-runtimedefault/
+# Remove: revert to base (kubectl apply -k deploy/kubernetes/base/)
+#
+# Compatible with the hardened overlay — apply both via:
+#   kubectl kustomize deploy/kubernetes/overlays/hardened | kubectl apply -f -
+# (chain via a composite overlay that lists both as resources if needed)
+
+namespace: sourcebridge
+
+resources:
+  - ../../base
+
+patches:
+  - path: api-deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: sourcebridge-api
+  - path: worker-deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: sourcebridge-worker
+  - path: web-deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: sourcebridge-web

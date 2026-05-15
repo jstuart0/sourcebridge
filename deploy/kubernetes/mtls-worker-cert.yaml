@@ -23,11 +23,12 @@ spec:
     - client auth
     - digital signature
     - key encipherment
+  # CA-234 / CA-359: updated to match the renamed Service (worker → sourcebridge-worker).
   dnsNames:
-    - worker
-    - worker.sourcebridge
-    - worker.sourcebridge.svc
-    - worker.sourcebridge.svc.cluster.local
+    - sourcebridge-worker
+    - sourcebridge-worker.sourcebridge
+    - sourcebridge-worker.sourcebridge.svc
+    - sourcebridge-worker.sourcebridge.svc.cluster.local
   issuerRef:
     name: sourcebridge-ca
     kind: Issuer

@@ -162,7 +162,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: worker
+  # CA-234 / CA-359: renamed from "worker" to "sourcebridge-worker" for
+  # consistency with all other sourcebridge service names. The configmap
+  # SOURCEBRIDGE_WORKER_ADDRESS was updated in lockstep. Update the
+  # SOURCEBRIDGE_WORKER_TLS_SERVER_NAME env var and any cert-manager
+  # Certificate dnsNames accordingly when enabling mTLS.
+  name: sourcebridge-worker
   namespace: sourcebridge
   labels:
     app.kubernetes.io/name: sourcebridge-worker

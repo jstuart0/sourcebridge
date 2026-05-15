@@ -11,8 +11,9 @@ data:
   SOURCEBRIDGE_STORAGE_SURREAL_DATABASE: "sourcebridge"
   SOURCEBRIDGE_STORAGE_REDIS_MODE: "memory"
   SOURCEBRIDGE_STORAGE_REPO_CACHE_PATH: "/data/repo-cache"
-  # Worker gRPC address (Viper reads SOURCEBRIDGE_WORKER_ADDRESS)
-  SOURCEBRIDGE_WORKER_ADDRESS: "worker.sourcebridge.svc.cluster.local:50051"
+  # Worker gRPC address (Viper reads SOURCEBRIDGE_WORKER_ADDRESS).
+  # CA-234 / CA-359: updated to match the renamed Service (worker → sourcebridge-worker).
+  SOURCEBRIDGE_WORKER_ADDRESS: "sourcebridge-worker.sourcebridge.svc.cluster.local:50051"
   # mTLS for the API↔worker gRPC channel (slice 4 of plan
   # 2026-04-29-workspace-llm-source-of-truth-r2.md). Default disabled.
   # To enable production mTLS:
@@ -35,7 +36,10 @@ data:
   # leaf Certificate Secret (since v1.0). We read the CA chain from the
   # leaf Secret directly — no separate mount of the CA Secret needed.
   SOURCEBRIDGE_WORKER_TLS_CA_PATH: "/etc/sourcebridge/tls/ca.crt"
-  SOURCEBRIDGE_WORKER_TLS_SERVER_NAME: "worker.sourcebridge.svc.cluster.local"
+  # CA-234 / CA-359: updated to match the renamed Service.
+  # When enabling mTLS, re-issue the worker cert with dnsNames including
+  # sourcebridge-worker.sourcebridge.svc.cluster.local (see mtls-worker-cert.yaml).
+  SOURCEBRIDGE_WORKER_TLS_SERVER_NAME: "sourcebridge-worker.sourcebridge.svc.cluster.local"
   SOURCEBRIDGE_WORKER_SURREAL_URL: "ws://surrealdb.sourcebridge.svc.cluster.local:8000"
   SOURCEBRIDGE_WORKER_SURREAL_NAMESPACE: "sourcebridge"
   SOURCEBRIDGE_WORKER_SURREAL_DATABASE: "sourcebridge"

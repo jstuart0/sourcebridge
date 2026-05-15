@@ -4,10 +4,11 @@ description: SourceBridge - Requirement-Aware Code Comprehension Platform
 type: application
 version: 0.2.0
 appVersion: "0.2.0"
-home: https://github.com/sourcebridge/sourcebridge
+# CA-358: corrected to canonical GitHub org (sourcebridge-ai/sourcebridge).
+home: https://github.com/sourcebridge-ai/sourcebridge
 icon: ""
 sources:
-  - https://github.com/sourcebridge/sourcebridge
+  - https://github.com/sourcebridge-ai/sourcebridge
 keywords:
   - code-analysis
   - requirements-traceability

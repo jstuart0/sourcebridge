@@ -266,6 +266,33 @@ SOURCEBRIDGE_STORAGE_REPO_CACHE_PATH=/data/repo-cache
 
 In Docker Compose, mount this as a volume so cloned repos survive container restarts.
 
+**Cold-start penalty (CA-237):** the repo-cache directory is **not** persisted across
+pod restarts in the kustomize base or Helm chart by default — there is no PVC for it.
+Every API pod restart re-clones all indexed repositories on first access, which can add
+tens of seconds per repository before indexing or knowledge generation can proceed.
+
+To eliminate this penalty in production:
+
+- **Docker Compose**: the compose file already mounts `repo-cache` as a named volume.
+  No change needed.
+- **Kubernetes (kustomize base)**: add a PVC at `/data/repo-cache` to the API
+  Deployment via an overlay patch, or use a `hostPath` volume for single-node clusters.
+- **Helm**: add a PVC with `api.extraVolumes` / `api.extraVolumeMounts` pointing at
+  `/data/repo-cache`. Example in `values.yaml`:
+
+  ```yaml
+  api:
+    extraVolumes:
+      - name: repo-cache
+        persistentVolumeClaim:
+          claimName: sourcebridge-repo-cache
+    extraVolumeMounts:
+      - name: repo-cache
+        mountPath: /data/repo-cache
+  ```
+
+  Create the PVC separately with a `Retain` storage class so it survives helm upgrades.
+
 ---
 
 ## 3. LLM Provider

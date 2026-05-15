@@ -47,6 +47,16 @@ spec:
 ---
 # API ingress: accept connections from the ingress controller (port 8080)
 # and from web pods (Next.js middleware proxy).
+#
+# CA-362: the ingress-controller selector currently targets Traefik only
+# (namespace: traefik, pod label: app.kubernetes.io/name: traefik).
+# For other ingress controllers, update the namespaceSelector and podSelector:
+#   nginx-ingress: namespace=ingress-nginx, pod app.kubernetes.io/name=ingress-nginx
+#   contour:       namespace=projectcontour, pod app.kubernetes.io/name=contour
+#   istio gateway: namespace=istio-system,   pod app=istio-ingressgateway
+# Helm users can override via --set networkPolicy.ingressControllerNamespace=<ns>
+# and --set networkPolicy.ingressControllerPodLabel=<label> if those values
+# are added to the Helm chart templates in a future release.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

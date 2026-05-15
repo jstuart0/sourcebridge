@@ -111,7 +111,11 @@ api:
       memory: 512Mi
     limits:
       cpu: "1"
-      memory: 1Gi
+      # CA-357: raised from 1Gi → 2Gi to match the kustomize base (deploy/kubernetes/base/api.yaml).
+      # The previous Helm default (1Gi) diverged from the kustomize base and was
+      # undersized for moderate repo workloads. Operators on very tight clusters
+      # can lower this; do not go below 512Mi.
+      memory: 2Gi
   # -- Writable emptyDir size limit used when securityContext.readOnlyRootFilesystem=true.
   # CA-350: /tmp is the API container's only writable path at runtime (the
   # repo-cache PVC is mounted separately). Default: 1Gi.
@@ -242,6 +246,12 @@ surrealdb:
   port: 8000
   persistence:
     enabled: true
+    # CA-361: storageClass defaults to "" which lets Kubernetes use the cluster's
+    # default StorageClass (suitable for kind / microk8s / most managed clusters).
+    # Production operators MUST override to a StorageClass with reclaimPolicy: Retain
+    # so the PVC survives a helm upgrade or accidental release deletion:
+    #   --set surrealdb.persistence.storageClass=standard-rwo-retain
+    # Without Retain, a `helm uninstall` deletes the PVC and all stored data.
     storageClass: ""
     size: 5Gi
     accessMode: ReadWriteOnce
@@ -261,7 +271,10 @@ redis:
   enabled: true
   image:
     repository: redis
-    tag: 7-alpine
+    # CA-356: pinned to patch-stable 7.4-alpine (was unversioned 7-alpine).
+    # Update to 7.4.x as point releases land; avoid floating :7-alpine in
+    # production to prevent surprise updates via image pull.
+    tag: 7.4-alpine
     pullPolicy: IfNotPresent
   port: 6379
   persistence:
