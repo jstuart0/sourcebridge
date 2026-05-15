@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 import { Button } from "@/components/ui/button";
 import { PageFrame } from "@/components/ui/page-frame";
@@ -228,6 +229,12 @@ function formatPercent(value?: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
+const HEALTH_STATUS_LABEL: Record<HealthPayload["status"], string> = {
+  healthy: "Healthy",
+  degraded: "Degraded",
+  unhealthy: "Unhealthy",
+};
+
 function healthStyle(status: HealthPayload["status"]) {
   switch (status) {
     case "healthy":
@@ -273,6 +280,7 @@ export default function MonitorPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<JobView | null>(null);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
+  const [drainConfirmOpen, setDrainConfirmOpen] = useState(false);
   const pollRef = useRef<number | null>(null);
   const seenTerminalRef = useRef<Record<string, string>>({});
 
@@ -564,7 +572,11 @@ export default function MonitorPage() {
             >
               {data?.control?.intake_paused ? "Resume intake" : "Pause intake"}
             </Button>
-            <Button variant="secondary" onClick={() => void drainQueue()}>
+            <Button
+              variant="secondary"
+              className="border-[var(--danger-border,#dc2626)] text-[var(--danger-text,#ef4444)] hover:bg-[var(--danger-bg,rgba(239,68,68,0.08))]"
+              onClick={() => setDrainConfirmOpen(true)}
+            >
               Drain pending
             </Button>
             <Button variant="secondary" onClick={() => void fetchActivity()}>
@@ -592,6 +604,20 @@ export default function MonitorPage() {
       </Panel>
 
       {selected ? <JobDetailDrawer job={selected} onClose={() => setSelected(null)} /> : null}
+
+      <ConfirmDialog
+        open={drainConfirmOpen}
+        title="Drain pending queue?"
+        body="This will cancel all pending (not yet running) jobs. Running jobs will continue to completion. This action cannot be undone."
+        confirmLabel="Drain pending"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={() => {
+          setDrainConfirmOpen(false);
+          void drainQueue();
+        }}
+        onCancel={() => setDrainConfirmOpen(false)}
+      />
     </PageFrame>
   );
 }
@@ -633,8 +659,8 @@ function HealthBanner({ health, error }: { health?: HealthPayload; error: string
     >
       <span className={cn("text-2xl", style.text)}>{style.icon}</span>
       <div className="flex-1">
-        <p className={cn("text-sm font-semibold uppercase tracking-wide", style.text)}>
-          {health.status}
+        <p className={cn("text-sm font-semibold", style.text)}>
+          {HEALTH_STATUS_LABEL[health.status]}
         </p>
         <p className="text-sm text-[var(--text-primary)]">{health.summary}</p>
       </div>

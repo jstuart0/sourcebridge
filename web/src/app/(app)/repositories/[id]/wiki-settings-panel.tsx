@@ -37,6 +37,7 @@ import {
   type RefObject,
 } from "react";
 import Link from "next/link";
+import { AlertCircle, AlertTriangle, Info } from "lucide-react";
 import { useMutation, useQuery } from "urql";
 import { authFetch } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
@@ -243,11 +244,11 @@ function AlertBanner({
       "border-amber-500 bg-[rgba(245,158,11,0.08)] text-amber-400",
     info: "border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-secondary)]",
   };
-  const icon = {
-    error: "✕",
-    warning: "⚠",
-    info: "ℹ",
-  };
+  const IconComponent = {
+    error: AlertCircle,
+    warning: AlertTriangle,
+    info: Info,
+  }[variant];
   return (
     <div
       role="alert"
@@ -257,9 +258,7 @@ function AlertBanner({
         colors[variant]
       )}
     >
-      <span className="mt-0.5 shrink-0 font-bold" aria-hidden="true">
-        {icon[variant]}
-      </span>
+      <IconComponent className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         <p>{message}</p>
         {children}
@@ -2339,9 +2338,7 @@ export function WikiSettingsPanel({
         {/* State 0 */}
         {panelState === "state0" && (
           <div className="flex items-start gap-3 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3">
-            <span className="mt-0.5 text-sm text-[var(--text-tertiary)]" aria-hidden="true">
-              ℹ
-            </span>
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-tertiary)]" aria-hidden="true" />
             <div className="min-w-0 text-sm">
               {global.killSwitchActive ? (
                 <p className="text-[var(--text-secondary)]">

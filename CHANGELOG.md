@@ -126,6 +126,20 @@ All notable changes to SourceBridge are documented here. The format follows
 - Helm worker memory recommendation raised to `4Gi` limit default in `values.yaml`
 - **CA-349: Worker memory limit canonicalized at `2Gi`** across both deployment methods. Kustomize base `deploy/kubernetes/base/worker.yaml` limit was `1Gi`; raised to `2Gi` to match Helm `values.yaml`. Memory **requests** are unchanged at `512Mi` (scheduler uses requests for placement; the `2Gi` limit only matters if the worker exceeds it at runtime).
 
+### UX
+
+- **CA-371**: Replaced `ℹ` Unicode glyph (AI-codegen tell) with Lucide `Info` icon in three banner contexts: repositories list page Living Wiki disabled banner, repository detail page Living Wiki discoverability callout, and wiki-settings-panel state-0 info row. `AlertBanner` component (error/warning/info variants) now uses `AlertCircle`/`AlertTriangle`/`Info` Lucide icons throughout.
+- **CA-372**: Monitor health banner status label no longer renders the raw enum value with `uppercase tracking-wide`. Added `HEALTH_STATUS_LABEL` lookup map; renders "Healthy", "Degraded", "Unhealthy" in sentence case.
+- **CA-373 / CA-251**: Provider toggle switch `peer-checked` color replaced from hardcoded `hsl(var(--accent-hue,250),60%,60%)` with `var(--accent-primary)` design token in three files: `settings/notifications/page.tsx`, `admin/llm/profile-editor.tsx`, `repositories/[id]/repository-llm-override-section.tsx`.
+- **CA-374**: Verified closed — Workflow Story empty-state "Generate story" button uses primary (not secondary) variant as of Phase 10 (CA-364). No code change.
+- **CA-375**: `artifactRetryLabel()` now returns `"Regenerate <artifact>"` for stale or failed artifacts and `"Refresh <artifact>"` only for fresh/ready artifacts. Previously returned `"Retry"` for failed and always `"Refresh"` for other states.
+- **CA-376**: Admin knowledge page per-artifact rows now show a "View" link to the repository knowledge tab when the artifact is stale or failed, giving operators a direct CTA rather than a dead-end status display.
+- **CA-377**: `scopeSubtitle()` for `REPOSITORY` scope changed from "Repository cliff notes" to "Repository overview" — the panel hosts multiple artifact types (cliff notes, learning paths, code tours, workflow stories) and must not single out one.
+- **CA-378**: "Drain pending" button on the monitor page now shows destructive styling (danger border/text colors) and opens a `ConfirmDialog` before executing the drain — preventing accidental queue cancellation. Dialog is keyboard-accessible (Escape to cancel, Tab-navigable).
+- **CA-379**: Non-repository scope subtitles (MODULE, FILE, SYMBOL) suppressed from `scopeSubtitle()` — the path is already shown in the breadcrumb above; duplicating it in the subtitle added visual noise with no new information.
+- **CA-380**: Onboarding step indicator ring now has accessibility attributes: `role="list"` on the container with `aria-label="Step N of M"`, `role="listitem"` on each indicator with its own step label, and `aria-current="step"` on the active step.
+- **CA-261**: Repository detail skeleton already has structural fidelity (breadcrumb slot, header bar with title+badge, 4-tab placeholder strip, 3 accordion-shaped panels) as of CA-320 Phase 3. No additional change needed; closing.
+
 ### Fixed
 
 - Knowledge tab Cliff Notes accordion: defaults closed when Cliff Notes exist; explicit empty-state CTA rendered when no Cliff Notes artifact exists yet (U-M13)

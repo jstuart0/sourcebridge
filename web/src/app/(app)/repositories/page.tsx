@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, FileText, FolderPlus, Trash2, Upload } from "lucide-react";
+import { ChevronRight, FileText, FolderPlus, Info, Trash2, Upload } from "lucide-react";
 import { useMutation, useQuery } from "urql";
 import {
   ADD_REPOSITORY_MUTATION,
@@ -255,9 +255,7 @@ export default function RepositoriesPage() {
           aria-live="polite"
           className="flex items-start gap-3 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3 text-sm"
         >
-          <span className="mt-0.5 shrink-0 text-[var(--text-tertiary)]" aria-hidden="true">
-            ℹ
-          </span>
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-tertiary)]" aria-hidden="true" />
           <p className="text-[var(--text-secondary)]">
             Living Wiki is globally disabled on this server. To start generating wiki
             pages for your repositories, enable it in{" "}
