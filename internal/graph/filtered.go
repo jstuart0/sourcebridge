@@ -281,8 +281,8 @@ func (f *TenantFilteredStore) GetSymbolsByIDs(ctx context.Context, ids []string)
 // The inner store is used for the caller-symbol batch lookup to avoid routing
 // through the filtered wrapper (which would double-count the access check and
 // could cause recursion if the implementation changes). Caller IDs whose symbols
-// cannot be found are retained conservatively (the caller may be from a repo not
-// yet indexed, not a cross-tenant leak).
+// cannot be found are DROPPED — a missing symbol may have been deleted from a
+// cross-tenant repo; retaining the ID would leak the foreign symbol ID.
 func (f *TenantFilteredStore) GetCallers(ctx context.Context, symbolID string) []string {
 	sym := f.inner.GetSymbol(ctx, symbolID)
 	if sym == nil || !f.hasAccess(sym.RepoID) {
@@ -296,15 +296,21 @@ func (f *TenantFilteredStore) GetCallers(ctx context.Context, symbolID string) [
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
 		cs, found := callerSyms[id]
-		if !found || f.hasAccess(cs.RepoID) {
-			out = append(out, id)
+		if !found || cs == nil {
+			continue // drop: missing symbol may be a deleted cross-tenant entity
 		}
+		if !f.hasAccess(cs.RepoID) {
+			continue
+		}
+		out = append(out, id)
 	}
 	return out
 }
 
 // GetCallees gates on the parent symbol's RepoID first (pre-retrieval parent gate),
 // then filters the returned callee IDs to those whose symbols belong to an allowed repo.
+// Callee IDs whose symbols cannot be found are DROPPED — a missing symbol may have been
+// deleted from a cross-tenant repo; retaining the ID would leak the foreign symbol ID.
 func (f *TenantFilteredStore) GetCallees(ctx context.Context, symbolID string) []string {
 	sym := f.inner.GetSymbol(ctx, symbolID)
 	if sym == nil || !f.hasAccess(sym.RepoID) {
@@ -318,16 +324,22 @@ func (f *TenantFilteredStore) GetCallees(ctx context.Context, symbolID string) [
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
 		cs, found := calleeSyms[id]
-		if !found || f.hasAccess(cs.RepoID) {
-			out = append(out, id)
+		if !found || cs == nil {
+			continue // drop: missing symbol may be a deleted cross-tenant entity
 		}
+		if !f.hasAccess(cs.RepoID) {
+			continue
+		}
+		out = append(out, id)
 	}
 	return out
 }
 
 // GetTestsForSymbolPersisted gates on the parent symbol's RepoID first
 // (pre-retrieval parent gate), then filters the returned test-symbol IDs to
-// those whose symbols belong to an allowed repo.
+// those whose symbols belong to an allowed repo. Test-symbol IDs whose symbols
+// cannot be found are DROPPED — a missing symbol may have been deleted from a
+// cross-tenant repo; retaining the ID would leak the foreign symbol ID.
 func (f *TenantFilteredStore) GetTestsForSymbolPersisted(ctx context.Context, symbolID string) []string {
 	sym := f.inner.GetSymbol(ctx, symbolID)
 	if sym == nil || !f.hasAccess(sym.RepoID) {
@@ -341,9 +353,13 @@ func (f *TenantFilteredStore) GetTestsForSymbolPersisted(ctx context.Context, sy
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
 		ts, found := testSyms[id]
-		if !found || f.hasAccess(ts.RepoID) {
-			out = append(out, id)
+		if !found || ts == nil {
+			continue // drop: missing symbol may be a deleted cross-tenant entity
 		}
+		if !f.hasAccess(ts.RepoID) {
+			continue
+		}
+		out = append(out, id)
 	}
 	return out
 }
@@ -355,8 +371,12 @@ func (f *TenantFilteredStore) GetCallEdges(ctx context.Context, repoID string) [
 	return f.inner.GetCallEdges(ctx, repoID)
 }
 
+// Stats returns empty counts from TenantFilteredStore. Returning global aggregate
+// counts would leak cross-tenant system scale via the PlatformStats GraphQL query.
+// Cross-tenant aggregates are available only via admin paths against the unfiltered
+// store. OSS deployments (no repoChecker, no TenantFilteredStore) are unaffected.
 func (f *TenantFilteredStore) Stats(ctx context.Context) map[string]int {
-	return f.inner.Stats(ctx)
+	return map[string]int{}
 }
 
 // GetRequirement gates on the returned requirement's RepoID. Returns nil for
@@ -633,11 +653,11 @@ func (f *TenantFilteredStore) GetRepoLinks(ctx context.Context, repoID string) (
 	return f.inner.GetRepoLinks(ctx, repoID)
 }
 
-// GetRepoLink is a pass-through used internally by UnlinkRepos and VerifyLink
-// as a helper to load a link for access validation. The hasAccess check is NOT
-// applied here — the caller is responsible for gating. Applying a second check
-// at this level would imply incorrect semantics (double-check that could block
-// internal helpers on the allowed path).
+// GetRepoLink is intentionally an ungated pass-through: it is called only by
+// UnlinkRepos and VerifyLink, which perform their own hasAccess check on both
+// source and target repos before delegating. Do not call this directly from a
+// public REST / GraphQL / MCP path without first applying
+// f.hasAccess(repoLink.SourceRepoID) AND f.hasAccess(repoLink.TargetRepoID).
 func (f *TenantFilteredStore) GetRepoLink(ctx context.Context, linkID string) *RepoLink {
 	return f.inner.GetRepoLink(ctx, linkID)
 }
@@ -654,7 +674,8 @@ func (f *TenantFilteredStore) StoreCrossRepoRef(ctx context.Context, ref *CrossR
 // repos are accessible to the tenant. Cross-tenant refs are dropped silently;
 // the returned count reflects only persisted refs (the accessible subset).
 func (f *TenantFilteredStore) StoreCrossRepoRefs(ctx context.Context, refs []*CrossRepoRef) int {
-	allowed := refs[:0:len(refs)] // re-use backing array without allocation
+	// D-029 slice safety: fresh allocation to avoid mutating caller's backing array.
+	allowed := make([]*CrossRepoRef, 0, len(refs))
 	for _, ref := range refs {
 		if f.hasAccess(ref.SourceRepoID) && f.hasAccess(ref.TargetRepoID) {
 			allowed = append(allowed, ref)

@@ -610,3 +610,87 @@ func TestTenantFilteredStoreCallGraphFilter_DoesNotMutateInnerStore(t *testing.T
 		t.Fatalf("inner store reverseCallGraph mutated: got %v", original)
 	}
 }
+
+// TestCallGraphFilter_DropsDeletedCrossTenantIDs is the M1 regression gate (A-H2 reconcile r1).
+//
+// Verifies that when a symbol ID is present in the call-graph but the corresponding
+// symbol record no longer exists in the inner store (e.g., deleted after the edge was
+// written), the ID is DROPPED rather than retained in the output.
+// Prior to the fix the !found branch appended the ID, leaking the deleted foreign symbol ID.
+func TestCallGraphFilter_DropsDeletedCrossTenantIDs(t *testing.T) {
+	ctx := context.Background()
+	inner := NewStore()
+
+	inner.mu.Lock()
+	inner.repos["repo-allowed"] = &Repository{ID: "repo-allowed"}
+	// sym-A exists in the allowed repo; sym-deleted is referenced in the call-graph
+	// but has no symbol record (simulates a deleted cross-tenant symbol).
+	inner.symbols["sym-A"] = &StoredSymbol{ID: "sym-A", RepoID: "repo-allowed"}
+	// sym-A's callers: sym-deleted (no record) + sym-A itself (self-reference, allowed).
+	inner.reverseCallGraph["sym-A"] = []string{"sym-deleted", "sym-A"}
+	// sym-A's callees: sym-deleted (no record).
+	inner.callGraph["sym-A"] = []string{"sym-deleted"}
+	// sym-A's test symbols: sym-deleted (no record).
+	inner.testedByGraph["sym-A"] = []string{"sym-deleted", "sym-A"}
+	inner.mu.Unlock()
+
+	f := NewTenantFilteredStore(inner, []string{"repo-allowed"})
+
+	t.Run("GetCallers drops deleted ID", func(t *testing.T) {
+		got := f.GetCallers(ctx, "sym-A")
+		for _, id := range got {
+			if id == "sym-deleted" {
+				t.Fatal("deleted cross-tenant symbol ID leaked into GetCallers result")
+			}
+		}
+		if len(got) != 1 || got[0] != "sym-A" {
+			t.Fatalf("expected [sym-A], got %v", got)
+		}
+	})
+
+	t.Run("GetCallees drops deleted ID", func(t *testing.T) {
+		got := f.GetCallees(ctx, "sym-A")
+		for _, id := range got {
+			if id == "sym-deleted" {
+				t.Fatal("deleted cross-tenant symbol ID leaked into GetCallees result")
+			}
+		}
+		if len(got) != 0 {
+			t.Fatalf("expected empty, got %v", got)
+		}
+	})
+
+	t.Run("GetTestsForSymbolPersisted drops deleted ID", func(t *testing.T) {
+		got := f.GetTestsForSymbolPersisted(ctx, "sym-A")
+		for _, id := range got {
+			if id == "sym-deleted" {
+				t.Fatal("deleted cross-tenant symbol ID leaked into GetTestsForSymbolPersisted result")
+			}
+		}
+		if len(got) != 1 || got[0] != "sym-A" {
+			t.Fatalf("expected [sym-A], got %v", got)
+		}
+	})
+}
+
+// TestTenantFilteredStore_StatsReturnsEmpty is the M2 regression gate (A-H2 reconcile r1).
+//
+// TenantFilteredStore.Stats() must return an empty map so cross-tenant aggregate
+// counts are not exposed to arbitrary tenants via the PlatformStats GraphQL query.
+func TestTenantFilteredStore_StatsReturnsEmpty(t *testing.T) {
+	ctx := context.Background()
+	inner := NewStore()
+
+	// Seed some data so inner.Stats() would return non-zero values.
+	inner.mu.Lock()
+	inner.repos["r1"] = &Repository{ID: "r1"}
+	inner.symbols["s1"] = &StoredSymbol{ID: "s1", RepoID: "r1"}
+	inner.mu.Unlock()
+
+	f := NewTenantFilteredStore(inner, []string{"r1"})
+	got := f.Stats(ctx)
+
+	if len(got) != 0 {
+		t.Fatalf("TenantFilteredStore.Stats() must return empty map; got %v", got)
+	}
+}

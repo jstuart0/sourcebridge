@@ -4160,7 +4160,13 @@ func (r *queryResolver) LlmUsage(ctx context.Context, repositoryID *string, limi
 }
 
 // PlatformStats is the resolver for the platformStats field.
+// Admin role is required: Stats() on TenantFilteredStore returns empty values,
+// so non-admin tenants would get zeros — gating here makes the intent explicit
+// and is defense-in-depth against future Stats() widening.
 func (r *queryResolver) PlatformStats(ctx context.Context) (*PlatformStats, error) {
+	if !currentUserIsAdmin(ctx) {
+		return nil, fmt.Errorf("admin role required")
+	}
 	if r.getStore(ctx) == nil {
 		return &PlatformStats{}, nil
 	}
