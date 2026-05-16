@@ -11,6 +11,8 @@ import asyncio
 import httpx
 import structlog
 
+from workers.common.llm.rebind_guard import RebindGuardedTransport
+
 log = structlog.get_logger()
 
 _BATCH_SIZE = 256
@@ -24,6 +26,12 @@ class OpenAICompatEmbeddingProvider:
     """Embedding provider using the OpenAI /v1/embeddings API.
 
     Compatible with OpenAI, Ollama (via /v1/embeddings), vLLM, LiteLLM, etc.
+
+    Each request uses a fresh ``httpx.AsyncClient`` with a per-call
+    ``RebindGuardedTransport`` so that DNS-rebind attacks against the
+    operator-configured ``base_url`` are blocked at request time (D-013 /
+    X-H1).  httpx's ``async with`` ``__aexit__`` calls ``aclose()`` on the
+    transport, which is correct and harmless for per-call instantiation.
     """
 
     def __init__(
@@ -33,23 +41,33 @@ class OpenAICompatEmbeddingProvider:
         dimension: int = 768,
         api_key: str = "",
         timeout: float = 300.0,
+        allow_private: bool = True,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._dimension = dimension
-        headers = {"Content-Type": "application/json"}
+        self._timeout = timeout
+        # D-013 / D-014: stored so per-call transport mirrors the operator's
+        # llm_allow_private_base_url policy.  Defaults True (same as the LLM
+        # provider factory) so local/self-hosted setups work out of the box.
+        self._allow_private = allow_private
+        self._headers: dict[str, str] = {"Content-Type": "application/json"}
         if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        self._client = httpx.AsyncClient(timeout=timeout, headers=headers)
+            self._headers["Authorization"] = f"Bearer {api_key}"
 
     async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Embed a single batch of texts."""
-        response = await self._client.post(
-            f"{self._base_url}/v1/embeddings",
-            json={"model": self._model, "input": texts},
-        )
-        response.raise_for_status()
-        data = response.json()
+        async with httpx.AsyncClient(
+            transport=RebindGuardedTransport(allow_private=self._allow_private),
+            timeout=self._timeout,
+            headers=self._headers,
+        ) as client:
+            response = await client.post(
+                f"{self._base_url}/v1/embeddings",
+                json={"model": self._model, "input": texts},
+            )
+            response.raise_for_status()
+            data = response.json()
 
         items = sorted(data["data"], key=lambda x: x["index"])
         return [item["embedding"] for item in items]
@@ -92,5 +110,4 @@ class OpenAICompatEmbeddingProvider:
         return self._dimension
 
     async def close(self) -> None:
-        """Close the underlying HTTP client."""
-        await self._client.aclose()
+        """No-op: per-call clients are closed after each request."""

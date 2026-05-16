@@ -146,9 +146,19 @@ class OpenAICompatProvider:
         # allow_private mirrors SOURCEBRIDGE_WORKER_LLM_ALLOW_PRIVATE_BASE_URL so
         # Ollama/vLLM operators (allow_private=True, the default) can still reach
         # their private-network endpoints while cloud-metadata IPs are always blocked.
-        _transport = RebindGuardedTransport(allow_private=allow_private_base_url)
+        #
+        # self._rebind_transport is kept as an instance field for the AsyncOpenAI SDK
+        # client because the transport's lifecycle must match the provider instance.
+        # The Ollama-native paths (_complete_ollama_native, _stream_ollama_native)
+        # use per-call RebindGuardedTransport instantiation — httpx's `async with`
+        # __aexit__ calls aclose() on the transport, which would tear down the
+        # shared connection pool if the SDK client's transport were reused there.
+        self._rebind_transport = RebindGuardedTransport(allow_private=allow_private_base_url)
+        # Store allow_private so per-call transport instantiation in Ollama-native
+        # paths can mirror the same policy without sharing the SDK client's transport.
+        self._allow_private_base_url = allow_private_base_url
         _http_client = httpx.AsyncClient(
-            transport=_transport,
+            transport=self._rebind_transport,
             timeout=effective_timeout,
         )
         self.client = openai.AsyncOpenAI(
@@ -382,7 +392,13 @@ class OpenAICompatProvider:
         )
 
         t0 = _time.monotonic()
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        # Per-call RebindGuardedTransport: httpx's async-with __aexit__ calls
+        # aclose() on the transport, which would tear down the shared connection
+        # pool if self._rebind_transport were reused here (D-014).
+        async with httpx.AsyncClient(
+            transport=RebindGuardedTransport(allow_private=self._allow_private_base_url),
+            timeout=self.timeout,
+        ) as client:
             resp = await client.post(url, json=body)
             resp.raise_for_status()
         generation_time_ms = int((_time.monotonic() - t0) * 1000)
@@ -457,22 +473,27 @@ class OpenAICompatProvider:
             transport="native",
         )
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client, client.stream("POST", url, json=body) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    delta = (chunk.get("message") or {}).get("content") or ""
-                    if delta:
-                        yield _strip_think_tags(delta) if re.search(
-                            r"<think(?:ing)?>", delta, re.IGNORECASE
-                        ) else delta
-                    if chunk.get("done"):
-                        break
+        # Per-call RebindGuardedTransport (same reasoning as _complete_ollama_native).
+        async with (
+            httpx.AsyncClient(
+                transport=RebindGuardedTransport(allow_private=self._allow_private_base_url),
+                timeout=self.timeout,
+            ) as client,
+            client.stream("POST", url, json=body) as resp,
+        ):
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                delta = (chunk.get("message") or {}).get("content") or ""
+                if delta:
+                    yield _strip_think_tags(delta) if re.search(r"<think(?:ing)?>", delta, re.IGNORECASE) else delta
+                if chunk.get("done"):
+                    break
 
     async def _complete_once(
         self,

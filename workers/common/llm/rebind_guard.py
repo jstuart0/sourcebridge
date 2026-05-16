@@ -26,10 +26,11 @@ Two separate tiers of enforcement:
 Load-bearing constraints:
   - Do NOT add a flag to disable this guard entirely.  The only knob is
     ``allow_private`` (mirrors ``SOURCEBRIDGE_WORKER_LLM_ALLOW_PRIVATE_BASE_URL``).
-  - ``socket.gaierror`` is swallowed silently — httpx owns the "host unreachable"
-    error path; the guard only adds the DNS-rebind check.
+  - ``socket.gaierror`` on the executor-offloaded DNS call falls through to
+    ``super().handle_async_request`` — httpx owns the "host unreachable" error
+    path; the guard only adds the DNS-rebind check.
   - IP literals in URLs are also checked because ``socket.getaddrinfo`` returns
-    the literal address unchanged, and ``_is_private_or_internal_ip`` handles it.
+    the literal address unchanged, and ``is_private_or_internal_ip`` handles it.
   - The guard is wired at provider *construction* time, so the transport is shared
     across all requests from the same provider instance.  That is correct — the
     check is per-request (``handle_async_request`` is called per HTTP request).
@@ -37,71 +38,12 @@ Load-bearing constraints:
 
 from __future__ import annotations
 
-import ipaddress
+import asyncio
 import socket
 
 import httpx
 
-# Inline the private-IP check to avoid a circular import:
-#   rebind_guard → config → anthropic → rebind_guard
-# The logic is identical to _is_private_or_internal_ip in config.py; keep them
-# in sync if either is changed.  CGNAT: 100.64.0.0/10 (RFC 6598) is not
-# classified as private by stdlib ipaddress.
-_CGNAT_NETWORK = ipaddress.IPv4Network("100.64.0.0/10")
-
-
-def _is_private_or_internal_ip(addr: str) -> bool:
-    """Return True if ``addr`` is in any SSRF-denylist range.
-
-    Covers: RFC1918 private, loopback, link-local, CGNAT (100.64/10),
-    ULA (fc00::/7), unspecified (0.0.0.0/::), multicast.
-    Mirrors config._is_private_or_internal_ip — inlined here to avoid circular import.
-    """
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
-        return False
-    if (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_unspecified
-        or ip.is_multicast
-        or ip.is_reserved
-    ):
-        return True
-    if isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_NETWORK:
-        return True
-    return False
-
-# Cloud-metadata / link-local block that fires regardless of allow_private.
-# 169.254.0.0/16 is IPv4 link-local (IS_LINK_LOCAL covers this) and the
-# well-known IMDS range used by AWS (169.254.169.254), GCP (169.254.169.254),
-# Azure (169.254.169.254), and DigitalOcean (169.254.169.254).
-# IPv6 link-local (fe80::/10) is also IS_LINK_LOCAL.
-# This is an additional hard guard; _is_private_or_internal_ip already catches
-# link-local, but making it explicit prevents any future refactoring of that
-# helper from accidentally removing the cloud-metadata protection.
-# Kept for reference — not used in range checks because is_link_local covers
-# both 169.254.0.0/16 and fe80::/10 natively.  Having an explicit constant makes
-# the intent visible when reading the code.
-_CLOUD_METADATA_NETS = (
-    ipaddress.IPv4Network("169.254.0.0/16"),  # IPv4 link-local / AWS/GCP/Azure IMDS
-    ipaddress.IPv6Network("fe80::/10"),  # IPv6 link-local
-)
-
-
-def _is_cloud_metadata_ip(addr: str) -> bool:
-    """Return True if ``addr`` is a cloud-metadata / link-local IP.
-
-    Fires regardless of ``allow_private``.  A separate, more targeted check
-    that ensures IMDS is always blocked even when private IPs are permitted.
-    """
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
-        return False
-    return ip.is_link_local  # covers 169.254.0.0/16 and fe80::/10
+from workers.common.llm.ip_check import is_cloud_metadata_ip, is_private_or_internal_ip
 
 
 class RebindGuardedTransport(httpx.AsyncHTTPTransport):
@@ -115,6 +57,12 @@ class RebindGuardedTransport(httpx.AsyncHTTPTransport):
 
     Instantiated with ``allow_private`` mirroring
     ``WorkerConfig.llm_allow_private_base_url``.
+
+    The DNS lookup is offloaded to a thread-pool executor so that the async
+    event loop is not blocked during ``socket.getaddrinfo`` (which is a
+    blocking syscall).  The default ``ThreadPoolExecutor`` has at least
+    ``cpu_count + 4`` threads; with an LLM gate capping concurrent calls at
+    ≤32, there is always headroom.
     """
 
     def __init__(self, allow_private: bool, **kwargs: object) -> None:
@@ -124,30 +72,34 @@ class RebindGuardedTransport(httpx.AsyncHTTPTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         host = request.url.host
         if host:
+            loop = asyncio.get_running_loop()
             try:
-                infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-                for info in infos:
-                    ip = info[4][0]
-                    # Tier 1: cloud-metadata / link-local — always blocked.
-                    if _is_cloud_metadata_ip(ip):
-                        raise httpx.ConnectError(
-                            f"dns-rebind-guard: refusing connection to cloud-metadata "
-                            f"IP {ip!r} resolved from host {host!r}. "
-                            "This is a likely DNS rebind attack. "
-                            "See SECURITY.md and internal/indexing/pathutil/pathutil.go:266.",
-                            request=request,
-                        )
-                    # Tier 2: other private/internal IPs — blocked unless allow_private.
-                    if not self._allow_private and _is_private_or_internal_ip(ip):
-                        raise httpx.ConnectError(
-                            f"dns-rebind-guard: refusing connection to private IP "
-                            f"{ip!r} resolved from host {host!r} "
-                            "(allow_private=False). "
-                            "Set SOURCEBRIDGE_WORKER_LLM_ALLOW_PRIVATE_BASE_URL=true "
-                            "for self-hosted internal LLM providers.",
-                            request=request,
-                        )
+                infos = await loop.run_in_executor(None, socket.getaddrinfo, host, None, 0, 0, socket.IPPROTO_TCP)
+                # Pass-through on DNS failure — httpx emits its own host-unreachable
+                # error.  Bounded by LLM gate (max_concurrent_calls ≤ 32);
+                # default ThreadPoolExecutor has ≥ cpu_count+4 threads.
             except socket.gaierror:
-                # Unresolvable hostname — let httpx handle it normally.
-                pass
+                return await super().handle_async_request(request)
+
+            for info in infos:
+                ip = info[4][0]
+                # Tier 1: cloud-metadata / link-local — always blocked.
+                if is_cloud_metadata_ip(ip):
+                    raise httpx.ConnectError(
+                        f"dns-rebind-guard: refusing connection to cloud-metadata "
+                        f"IP {ip!r} resolved from host {host!r}. "
+                        "This is a likely DNS rebind attack. "
+                        "See SECURITY.md and internal/indexing/pathutil/pathutil.go:266.",
+                        request=request,
+                    )
+                # Tier 2: other private/internal IPs — blocked unless allow_private.
+                if not self._allow_private and is_private_or_internal_ip(ip):
+                    raise httpx.ConnectError(
+                        f"dns-rebind-guard: refusing connection to private IP "
+                        f"{ip!r} resolved from host {host!r} "
+                        "(allow_private=False). "
+                        "Set SOURCEBRIDGE_WORKER_LLM_ALLOW_PRIVATE_BASE_URL=true "
+                        "for self-hosted internal LLM providers.",
+                        request=request,
+                    )
         return await super().handle_async_request(request)

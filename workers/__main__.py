@@ -446,6 +446,7 @@ async def serve() -> None:
                 base_url=base_url,
                 model=config.llm_model,
                 api_key=config.llm_api_key,
+                allow_private=config.llm_allow_private_base_url,
             )
             asyncio.create_task(
                 run_startup_probe(

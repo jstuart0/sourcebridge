@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING, Protocol
 
 import structlog
 
+from workers.common.llm.rebind_guard import RebindGuardedTransport
+
 if TYPE_CHECKING:
     pass
 
@@ -66,10 +68,13 @@ class OpenAICompatProbeBackend:
     matters.
     """
 
-    def __init__(self, base_url: str, model: str, api_key: str = "") -> None:
+    def __init__(self, base_url: str, model: str, api_key: str = "", allow_private: bool = True) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._api_key = api_key
+        # D-014 / D-017: mirrors WorkerConfig.llm_allow_private_base_url so the
+        # probe respects the same private-IP policy as the main LLM client.
+        self._allow_private = allow_private
 
     async def call(self) -> float:
         """Fire one probe call; return wall-time in seconds."""
@@ -87,7 +92,12 @@ class OpenAICompatProbeBackend:
         }
 
         start = time.monotonic()
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # Per-call RebindGuardedTransport — probe fires against operator-configured
+        # base_url; must enforce the same DNS-rebind policy as the LLM client.
+        async with httpx.AsyncClient(
+            transport=RebindGuardedTransport(allow_private=self._allow_private),
+            timeout=30.0,
+        ) as client:
             with contextlib.suppress(Exception):
                 await client.post(
                     f"{self._base_url}/chat/completions",

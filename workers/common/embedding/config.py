@@ -47,6 +47,9 @@ async def create_embedding_provider(
             base_url=base_url,
             model=config.embedding_model,
             dimension=config.embedding_dimension,
+            # D-013: pass allow_private so the DNS-rebind guard mirrors the
+            # same policy as the LLM provider (llm_allow_private_base_url).
+            allow_private=config.llm_allow_private_base_url,
         )
         embed_base_url: str | None = base_url
         embed_provider_name = "ollama"
@@ -59,6 +62,8 @@ async def create_embedding_provider(
             model=config.embedding_model,
             dimension=config.embedding_dimension,
             api_key=config.embedding_api_key,
+            # D-013: same allow_private policy as the LLM provider.
+            allow_private=config.llm_allow_private_base_url,
         )
         embed_base_url = base_url
         embed_provider_name = config.embedding_provider

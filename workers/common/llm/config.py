@@ -15,6 +15,7 @@ from workers.common.config import (
 )
 from workers.common.llm.anthropic import AnthropicProvider
 from workers.common.llm.fake import FakeLLMProvider
+from workers.common.llm.ip_check import is_private_or_internal_ip
 from workers.common.llm.openai_compat import OpenAICompatProvider
 from workers.common.llm.provider import LLMProvider
 
@@ -24,37 +25,6 @@ if TYPE_CHECKING:
 
 def _env_truthy(value: str) -> bool:
     return value.strip().lower() in ("true", "1", "yes", "on")
-
-
-# CA-214: LLM base-URL SSRF guard — mirrors Go's pathutil.ValidateLLMBaseURL.
-
-# CGNAT: 100.64.0.0/10 (RFC 6598) — not classified as private by stdlib.
-_CGNAT_NETWORK = ipaddress.IPv4Network("100.64.0.0/10")
-
-
-def _is_private_or_internal_ip(addr: str) -> bool:
-    """Return True if ``addr`` is in any SSRF-denylist range.
-
-    Covers: RFC1918 private, loopback, link-local, CGNAT (100.64/10),
-    ULA (fc00::/7), unspecified (0.0.0.0/::), multicast.
-    """
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
-        return False
-    if (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_unspecified
-        or ip.is_multicast
-        or ip.is_reserved
-    ):
-        return True
-    # CGNAT: ipaddress.is_private does not cover 100.64.0.0/10 in older Pythons.
-    if isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_NETWORK:
-        return True
-    return False
 
 
 def validate_llm_base_url(url: str, allow_private: bool) -> None:
@@ -82,9 +52,7 @@ def validate_llm_base_url(url: str, allow_private: bool) -> None:
         return
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise ValueError(
-            f"LLM base URL scheme not allowed ({parsed.scheme!r}); use http:// or https://"
-        )
+        raise ValueError(f"LLM base URL scheme not allowed ({parsed.scheme!r}); use http:// or https://")
     host = parsed.hostname or ""
     if not host:
         raise ValueError("LLM base URL is missing a host")
@@ -93,7 +61,7 @@ def validate_llm_base_url(url: str, allow_private: bool) -> None:
     # If host is a bare IP, check directly.
     try:
         addr = ipaddress.ip_address(host)
-        if _is_private_or_internal_ip(str(addr)):
+        if is_private_or_internal_ip(str(addr)):
             raise ValueError(
                 f"LLM base URL hostname resolves to a private IP ({host}); "
                 "set SOURCEBRIDGE_WORKER_LLM_ALLOW_PRIVATE_BASE_URL=true for "
@@ -108,12 +76,10 @@ def validate_llm_base_url(url: str, allow_private: bool) -> None:
     try:
         results = socket.getaddrinfo(host, None)
     except OSError as exc:
-        raise ValueError(
-            f"LLM base URL hostname is unresolvable ({host}): {exc}"
-        ) from exc
+        raise ValueError(f"LLM base URL hostname is unresolvable ({host}): {exc}") from exc
     for _family, _type, _proto, _canonname, sockaddr in results:
         addr_str = sockaddr[0]
-        if _is_private_or_internal_ip(addr_str):
+        if is_private_or_internal_ip(addr_str):
             raise ValueError(
                 f"LLM base URL hostname resolves to a private IP "
                 f"({host} → {addr_str}); set "
