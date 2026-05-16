@@ -64,8 +64,11 @@ class RebindGuardedTransport(httpx.AsyncHTTPTransport):
     The DNS lookup is offloaded to a thread-pool executor so that the async
     event loop is not blocked during ``socket.getaddrinfo`` (which is a
     blocking syscall).  The default ``ThreadPoolExecutor`` has at least
-    ``cpu_count + 4`` threads; with an LLM gate capping concurrent calls at
-    ≤32, there is always headroom.
+    ``cpu_count + 4`` threads.  The LLM gate
+    (``SOURCEBRIDGE_LLM_PROVIDER_*_MAX_CONCURRENT``, default hard cap 256)
+    determines upper concurrency.  Operators on slow-DNS topologies should
+    tune LLM concurrency caps to avoid thread-pool saturation; a dedicated
+    executor config option is a deferred follow-up.
     """
 
     def __init__(self, allow_private: bool, **kwargs: object) -> None:
@@ -79,8 +82,8 @@ class RebindGuardedTransport(httpx.AsyncHTTPTransport):
             try:
                 infos = await loop.run_in_executor(None, socket.getaddrinfo, host, None, 0, 0, socket.IPPROTO_TCP)
                 # Pass-through on DNS failure — httpx emits its own host-unreachable
-                # error.  Bounded by LLM gate (max_concurrent_calls ≤ 32);
-                # default ThreadPoolExecutor has ≥ cpu_count+4 threads.
+                # error.  Pool size: min(32, cpu_count+4) by default; see class
+                # docstring for concurrency tuning guidance.
             except socket.gaierror:
                 return await super().handle_async_request(request)
 

@@ -224,7 +224,9 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install yq
-        uses: mikefarah/yq@f15db9371d946456c5e1a1a4a6febbf7e4bc4a90 # v4.45.1
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
 
       - name: Validate version is SemVer
         # Guard against workflow_dispatch from a branch (e.g. main): GITHUB_REF_NAME

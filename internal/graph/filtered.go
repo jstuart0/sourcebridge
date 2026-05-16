@@ -10,11 +10,16 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
 )
 
-// TenantFilteredStore wraps a GraphStore and restricts access to repositories
-// belonging to a specific tenant. Methods that take a repoID parameter are
-// checked against the allow list; methods operating on child entities (symbols,
-// links, requirements by ID) pass through because the caller has already
-// validated repo access at a higher level.
+// TenantFilteredStore wraps an inner GraphStore with per-tenant repository access
+// control. ID-keyed lookups (GetSymbol, GetRequirement, GetLink, etc.) and
+// ID-keyed mutations (UpdateRequirementFields, PromoteDiscoveredRequirement,
+// DismissDiscoveredRequirement) post-retrieve their entity and verify the entity's
+// RepoID belongs to the tenant's allow set before returning data or applying writes.
+// Several methods (GetFileSymbols, GetLinksForFile, GetReviewResults, GetEmbedding,
+// StoreEmbedding, StoreReviewResult) remain intentionally ungated with load-bearing
+// comments — these have no current public API consumer and must be gated before
+// any new consumer adds them. See TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated
+// for the enforcement contract.
 type TenantFilteredStore struct {
 	inner      GraphStore
 	allowedIDs map[string]bool

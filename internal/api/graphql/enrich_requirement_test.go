@@ -546,6 +546,17 @@ func TestEnrichAllRequirements_BulkEnrichCapFromConfig(t *testing.T) {
 // The job enqueues with batchSize internally clamped to 100; RequirementsQueued
 // reflects all 3 seeded requirements (below the cap). This confirms the resolver
 // path without needing to execute the closure (which would require a real worker).
+//
+// Known gap (D-024b downgrade): this test verifies the resolver accepts
+// batchSize=200 without error and that RequirementsQueued reflects the full
+// input set. The internal clamp at schema.resolvers.go:1161-1163
+// (batch > 100 → batch = 100) is verified by code inspection only — observing
+// the runtime batch boundaries would require a counting LLMCaller fake running
+// jobs to completion. D-024b accepted this downgrade; tracked as a follow-up in
+// the campaign CHANGELOG (CHANGELOG entry: "batchSize clamp at 100 in
+// EnrichAllRequirements is verified via code inspection only, not behavioral
+// test observation. Follow-up: wire a counting LLMCaller fake to pin runtime
+// batch boundaries").
 func TestEnrichAllRequirements_BatchSizeClampsAt100(t *testing.T) {
 	store := graphstore.NewStore()
 	result := &indexer.IndexResult{RepoName: "repo", RepoPath: "/tmp"}
