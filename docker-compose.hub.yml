@@ -175,7 +175,12 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=localhost:50051"]
+      # CA-470 / O-H1: delegate to the baked script which reads
+      # SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET and injects -rpc-header when set.
+      # Matches the dev compose and kustomize/Helm patterns.
+      test:
+        - CMD-SHELL
+        - /usr/local/bin/sourcebridge-health-probe.sh
       interval: 5s
       timeout: 5s
       retries: 10

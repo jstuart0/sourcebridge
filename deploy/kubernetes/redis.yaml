@@ -20,9 +20,18 @@ spec:
         app.kubernetes.io/part-of: sourcebridge
         app.kubernetes.io/component: cache
     spec:
+      # CA-471 / O-M1: pod-level securityContext matching Helm CA-348 hardening.
+      # redis:7.4-alpine runs as UID/GID 999/999 (same as Helm).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
       containers:
         - name: redis
-          image: redis:7-alpine
+          # CA-471 / O-M1: pin to 7.4-alpine (matches Helm values.yaml:278 CA-356).
+          # Floating :7-alpine silently pulled new minor+patch versions on node restart.
+          image: redis:7.4-alpine
           args:
             # MCP sessions are ephemeral; we don't need RDB/AOF persistence
             # to survive a Redis restart — the client will just re-initialize.
@@ -38,6 +47,14 @@ spec:
             - containerPort: 6379
               name: redis
               protocol: TCP
+          # CA-471 / O-M1: container-level securityContext matching Helm CA-348.
+          # readOnlyRootFilesystem intentionally false: Redis writes temp files
+          # before atomic rename to /data even with RDB/AOF disabled.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests:
               memory: "64Mi"
@@ -46,10 +63,14 @@ spec:
               memory: "256Mi"
               cpu: "200m"
           livenessProbe:
-            tcpSocket:
-              port: redis
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            # CA-471 / O-M1: switch from tcpSocket to exec (matches Helm CA-226).
+            # tcpSocket passes even when Redis is not accepting commands; redis-cli
+            # ping validates the command plane.
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
           readinessProbe:
             exec:
               command: ["redis-cli", "ping"]

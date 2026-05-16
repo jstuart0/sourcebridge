@@ -2,8 +2,12 @@ apiVersion: v2
 name: sourcebridge
 description: SourceBridge - Requirement-Aware Code Comprehension Platform
 type: application
-version: 0.2.0
-appVersion: "0.2.0"
+# CA-472 / O-M2: bumped to 0.14.0 to match the current application release
+# (v0.14.0-rc.3 at audit time; rc suffix stripped per Helm SemVer convention).
+# The oss-release.yml CI step now patches both fields on every tagged release,
+# so this stays in sync automatically.
+version: 0.14.0
+appVersion: "0.14.0"
 # CA-358: corrected to canonical GitHub org (sourcebridge-ai/sourcebridge).
 home: https://github.com/sourcebridge-ai/sourcebridge
 icon: ""

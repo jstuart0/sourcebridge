@@ -196,6 +196,48 @@ jobs:
           # prerelease explicitly when the ref has a hyphen.
           prerelease: ${{ contains(github.ref_name, '-') }}
 
+  update-helm-chart:
+    # CA-472 / O-M2: bump Helm Chart.yaml version + appVersion to match the
+    # release tag. Runs after the release job so the chart is updated only
+    # when the full release (binaries + images) has succeeded.
+    #
+    # The commit is pushed back to the default branch (main). If the commit
+    # fails because main has diverged (e.g. another merge landed during the
+    # release), re-run this job from the Actions UI after resolving the conflict.
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: main
+          fetch-depth: 1
+          # Use GITHUB_TOKEN for the push — the checkout action auto-configures
+          # git credentials when token is supplied.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install yq
+        uses: mikefarah/yq@f15db9371d946456c5e1a1a4a6febbf7e4bc4a90 # v4.45.1
+
+      - name: Compute version (strip leading v)
+        id: version
+        run: echo "ver=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Update Helm Chart version
+        run: |
+          VERSION="${{ steps.version.outputs.ver }}"
+          yq -i ".version = \"${VERSION}\" | .appVersion = \"${VERSION}\"" deploy/helm/sourcebridge/Chart.yaml
+
+      - name: Commit and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/helm/sourcebridge/Chart.yaml
+          git diff --cached --quiet && echo "Chart.yaml already at target version — skipping commit" && exit 0
+          git commit -m "chore(helm): bump Chart.yaml to ${{ github.ref_name }} [skip ci]"
+          git push origin main
+
   tap-update:
     # Update the Homebrew tap formula after the release assets are published.
     # If this job fails the binaries are already on the Releases page — the

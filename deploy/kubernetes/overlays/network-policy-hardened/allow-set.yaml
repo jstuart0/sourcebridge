@@ -271,10 +271,17 @@ spec:
     - Egress
   egress:
     # API proxy (SOURCEBRIDGE_WEB_DEV_PROXY → api service on :8080)
+    # CA-473 / O-L1: AND-combinator (single list-item) matching the CA-346/347/355
+    # pattern for every other peer in this file. podSelector-only would allow
+    # traffic to any pod with this label in ANY namespace; namespaceSelector
+    # narrows it to the sourcebridge namespace.
     - to:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: sourcebridge-api
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sourcebridge
       ports:
         - protocol: TCP
           port: 8080

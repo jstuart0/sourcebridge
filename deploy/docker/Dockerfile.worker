@@ -86,10 +86,21 @@ RUN cat > /usr/local/bin/sourcebridge-health-probe.sh <<'PROBE_EOF' \
 # grpc_health_probe with TLS args ONLY when the worker bound mTLS.
 # Mirrors the behavior of workers/__main__.py's bind logic so the probe
 # transport always matches the server's accept transport.
+#
+# CA-470 / O-H1: inject the gRPC auth secret header when the env var is set.
+# The CA-202 gRPC interceptor requires the x-sb-worker-secret header on every
+# call including health probes. Without this, any deployment with a non-default
+# SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET causes the probe to be rejected with
+# Unauthenticated, marking the worker permanently unhealthy.
 set -eu
 PORT="${SOURCEBRIDGE_WORKER_GRPC_PORT:-50051}"
 ADDR="127.0.0.1:${PORT}"
 TLS_ENABLED="${SOURCEBRIDGE_WORKER_TLS_ENABLED:-false}"
+SECRET="${SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET:-}"
+RPC_HEADER_ARGS=""
+if [ -n "${SECRET}" ]; then
+    RPC_HEADER_ARGS="-rpc-header=x-sb-worker-secret:${SECRET}"
+fi
 case "${TLS_ENABLED}" in
     true|True|TRUE|1)
         # Verify mode: probe presents the worker's own client cert
@@ -103,13 +114,15 @@ case "${TLS_ENABLED}" in
             -tls-client-cert="${SOURCEBRIDGE_WORKER_TLS_CERT_PATH}" \
             -tls-client-key="${SOURCEBRIDGE_WORKER_TLS_KEY_PATH}" \
             -connect-timeout=2s \
-            -rpc-timeout=2s
+            -rpc-timeout=2s \
+            ${RPC_HEADER_ARGS}
         ;;
     *)
         exec /usr/local/bin/grpc_health_probe \
             -addr="${ADDR}" \
             -connect-timeout=2s \
-            -rpc-timeout=2s
+            -rpc-timeout=2s \
+            ${RPC_HEADER_ARGS}
         ;;
 esac
 PROBE_EOF

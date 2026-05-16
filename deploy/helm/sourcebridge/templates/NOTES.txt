@@ -26,11 +26,12 @@ WARNING: Back up your encryption Secret before every helm upgrade.
   WARNING: One or more image tags are set to "latest".
   This disables reproducible deployments — pod restarts may pull a different
   image version, and "helm rollback" becomes meaningless.
-  Pin to a specific version tag (e.g. "0.2.0") in your values file:
+  CA-472: leave the tag blank (default) to resolve to .Chart.AppVersion ({{ .Chart.AppVersion }}),
+  or pin explicitly in your values file:
 
-    api.image.tag: "0.2.0"
-    web.image.tag: "0.2.0"
-    worker.image.tag: "0.2.0"
+    api.image.tag: ""      # resolves to Chart.AppVersion ({{ .Chart.AppVersion }})
+    web.image.tag: ""      # resolves to Chart.AppVersion ({{ .Chart.AppVersion }})
+    worker.image.tag: ""   # resolves to Chart.AppVersion ({{ .Chart.AppVersion }})
 {{- end }}
 
 == Components ==

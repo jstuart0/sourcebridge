@@ -92,10 +92,9 @@ securityContext:
 api:
   image:
     repository: ghcr.io/sourcebridge-ai/sourcebridge-api
-    # Pinned to Chart.appVersion. Override for private registries:
-    #   --set api.image.repository=my-registry.example.com/sourcebridge-api
-    #   --set api.image.tag=0.3.0
-    tag: "0.2.0"
+    # CA-472 / O-M2: blank tag defaults to .Chart.AppVersion in the template.
+    # Override with --set api.image.tag=X.Y.Z for private registry or pinned version.
+    tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
   port: 8080
@@ -150,8 +149,9 @@ api:
 web:
   image:
     repository: ghcr.io/sourcebridge-ai/sourcebridge-web
-    # Pinned to Chart.appVersion. Override for private registries.
-    tag: "0.2.0"
+    # CA-472 / O-M2: blank tag defaults to .Chart.AppVersion in the template.
+    # Override with --set web.image.tag=X.Y.Z for pinned version.
+    tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
   port: 3000
@@ -185,8 +185,9 @@ web:
 worker:
   image:
     repository: ghcr.io/sourcebridge-ai/sourcebridge-worker
-    # Pinned to Chart.appVersion. Override for private registries.
-    tag: "0.2.0"
+    # CA-472 / O-M2: blank tag defaults to .Chart.AppVersion in the template.
+    # Override with --set worker.image.tag=X.Y.Z for pinned version.
+    tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
   port: 50051

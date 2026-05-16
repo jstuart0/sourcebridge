@@ -403,16 +403,16 @@ kubectl -n sourcebridge delete pvc --all
 | `global.tls.enabled` | Enable TLS on ingress | `false` |
 | `global.tls.secretName` | Pre-existing TLS secret name | `""` |
 | `api.image.repository` | API server image | `sourcebridge/api` |
-| `api.image.tag` | API server image tag | `latest` |
+| `api.image.tag` | API server image tag; blank = `.Chart.AppVersion` (CA-472) | `""` |
 | `api.replicas` | API server replicas | `1` |
 | `api.port` | API server port | `8080` |
 | `api.resources` | API server resource requests/limits | 250m-1 CPU, 512Mi-1Gi |
 | `web.image.repository` | Web UI image | `sourcebridge/web` |
-| `web.image.tag` | Web UI image tag | `latest` |
+| `web.image.tag` | Web UI image tag; blank = `.Chart.AppVersion` (CA-472) | `""` |
 | `web.replicas` | Web UI replicas | `1` |
 | `web.port` | Web UI port | `3000` |
 | `worker.image.repository` | Worker image | `sourcebridge/worker` |
-| `worker.image.tag` | Worker image tag | `latest` |
+| `worker.image.tag` | Worker image tag; blank = `.Chart.AppVersion` (CA-472) | `""` |
 | `worker.replicas` | Worker replicas | `1` |
 | `worker.env` | Worker environment variables (LLM config) | (see values.yaml) |
 | `surrealdb.enabled` | Deploy SurrealDB as part of the release | `true` |
