@@ -118,12 +118,25 @@ export function InFlightPagesPanel({ jobId }: { jobId: string }) {
   }
 
   const pages = data.pages ?? [];
+  const warnCount = pages.filter((p) =>
+    isWarnElapsed(
+      p.elapsed_ms,
+      data.median_completed_ms,
+      data.median_completed_ms_known
+    )
+  ).length;
 
   return (
     <div className="mt-3 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-subtle)] p-3">
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
         In-flight pages{pages.length > 0 ? ` (${pages.length})` : ""}
       </p>
+      {/* SR-only live region: announces slow-page count when it changes, not per-tick elapsed values */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {warnCount > 0
+          ? `${warnCount} slow page${warnCount !== 1 ? "s" : ""}`
+          : ""}
+      </span>
 
       {pages.length === 0 ? (
         <p className="text-xs text-[var(--text-secondary)]">
@@ -170,7 +183,7 @@ export function InFlightPagesPanel({ jobId }: { jobId: string }) {
                       })}
                     </td>
                     <td className="py-1.5">
-                      <span className="flex items-center gap-1.5" aria-live="polite" aria-atomic="false">
+                      <span className="flex items-center gap-1.5">
                         <span className={cn(warn ? "text-amber-700 dark:text-amber-300" : "text-[var(--text-secondary)]")}>
                           {formatElapsedInFlight(page.elapsed_ms)}
                         </span>

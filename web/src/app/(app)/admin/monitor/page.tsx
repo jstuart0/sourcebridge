@@ -852,12 +852,12 @@ function RecentHistoryTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[var(--border-default)] text-left text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
-            <th className="py-2 pr-3">Status</th>
-            <th className="py-2 pr-3">Job</th>
-            <th className="py-2 pr-3">Subsystem</th>
-            <th className="py-2 pr-3">Duration</th>
-            <th className="py-2 pr-3">Finished</th>
-            <th className="py-2 pr-3">Error</th>
+            <th scope="col" className="py-2 pr-3">Status</th>
+            <th scope="col" className="py-2 pr-3">Job</th>
+            <th scope="col" className="py-2 pr-3">Subsystem</th>
+            <th scope="col" className="py-2 pr-3">Duration</th>
+            <th scope="col" className="py-2 pr-3">Finished</th>
+            <th scope="col" className="py-2 pr-3">Error</th>
           </tr>
         </thead>
         <tbody>
@@ -1105,14 +1105,14 @@ function LLMGateActivitySection({ gates }: { gates: LLMGateEntry[] }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[var(--border-default)] text-left text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
-              <th className="py-2 pr-4">Provider</th>
-              <th className="py-2 pr-4">Endpoint</th>
-              <th className="py-2 pr-4">Kind</th>
-              <th className="py-2 pr-4">In-flight / Cap</th>
-              <th className="py-2 pr-4">Queued</th>
-              <th className="py-2 pr-4">Tok/s</th>
-              <th className="py-2 pr-4">429s</th>
-              <th className="py-2">Retries</th>
+              <th scope="col" className="py-2 pr-4">Provider</th>
+              <th scope="col" className="py-2 pr-4">Endpoint</th>
+              <th scope="col" className="py-2 pr-4">Kind</th>
+              <th scope="col" className="py-2 pr-4">In-flight / Cap</th>
+              <th scope="col" className="py-2 pr-4">Queued</th>
+              <th scope="col" className="py-2 pr-4">Tok/s</th>
+              <th scope="col" className="py-2 pr-4">429s</th>
+              <th scope="col" className="py-2">Retries</th>
             </tr>
           </thead>
           <tbody>
