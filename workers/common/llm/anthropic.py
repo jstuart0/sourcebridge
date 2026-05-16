@@ -17,8 +17,10 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 
 import anthropic
+import httpx
 
 from workers.common.llm.provider import LLMResponse
+from workers.common.llm.rebind_guard import RebindGuardedTransport
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +33,17 @@ class AnthropicProvider:
         api_key: str,
         model: str = "claude-sonnet-4-20250514",
         enable_cache: bool = True,
+        allow_private_base_url: bool = False,
     ) -> None:
+        # X-H2: DNS rebind guard — re-validates the resolved IP on every request.
+        # Anthropic is always a cloud provider so allow_private defaults False here;
+        # the factory passes the config value for consistency.
+        _transport = RebindGuardedTransport(allow_private=allow_private_base_url)
+        _http_client = httpx.AsyncClient(transport=_transport)
         self.client = anthropic.AsyncAnthropic(
             api_key=api_key,
             max_retries=0,  # Phase 3: SDK retry disabled; tenacity owns retry (Decision 3)
+            http_client=_http_client,
         )
         self.model = model
         self.enable_cache = enable_cache

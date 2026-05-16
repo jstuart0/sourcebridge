@@ -12,6 +12,7 @@ import structlog
 
 from workers.common.llm.concurrency import is_local_provider
 from workers.common.llm.provider import LLMResponse
+from workers.common.llm.rebind_guard import RebindGuardedTransport
 
 log = structlog.get_logger()
 
@@ -129,6 +130,7 @@ class OpenAICompatProvider:
         provider_name: str | None = None,
         disable_thinking: bool = False,
         timeout: float | None = None,
+        allow_private_base_url: bool = True,
     ) -> None:
         normalized_api_key = _normalize_api_key(provider_name, api_key)
         # openai>=2.34 rejects an empty api_key at construction time even for
@@ -140,12 +142,22 @@ class OpenAICompatProvider:
         # models). Callers can pass an explicit timeout sourced from the
         # admin-configured TimeoutSecs value.
         effective_timeout = 900.0 if timeout is None or timeout <= 0 else float(timeout)
+        # X-H2: DNS rebind guard — re-validates the resolved IP on every request.
+        # allow_private mirrors SOURCEBRIDGE_WORKER_LLM_ALLOW_PRIVATE_BASE_URL so
+        # Ollama/vLLM operators (allow_private=True, the default) can still reach
+        # their private-network endpoints while cloud-metadata IPs are always blocked.
+        _transport = RebindGuardedTransport(allow_private=allow_private_base_url)
+        _http_client = httpx.AsyncClient(
+            transport=_transport,
+            timeout=effective_timeout,
+        )
         self.client = openai.AsyncOpenAI(
             api_key=client_api_key,
             base_url=base_url,
             timeout=effective_timeout,
             default_headers=extra_headers or {},
             max_retries=0,  # Phase 3: SDK retry disabled; tenacity owns retry (Decision 3)
+            http_client=_http_client,
         )
         self.model = model
         self.draft_model = draft_model

@@ -205,7 +205,11 @@ def _build_raw_llm_provider(config: WorkerConfig) -> LLMProvider:
         return FakeLLMProvider()
 
     if config.llm_provider == "anthropic":
-        return AnthropicProvider(api_key=config.llm_api_key, model=config.llm_model)
+        return AnthropicProvider(
+            api_key=config.llm_api_key,
+            model=config.llm_model,
+            allow_private_base_url=config.llm_allow_private_base_url,
+        )
 
     if config.llm_provider == "lmstudio":
         lmstudio_url = config.llm_base_url or "http://localhost:1234/v1"
@@ -215,6 +219,7 @@ def _build_raw_llm_provider(config: WorkerConfig) -> LLMProvider:
             base_url=lmstudio_url,
             draft_model=config.llm_draft_model or None,
             provider_name="lmstudio",
+            allow_private_base_url=config.llm_allow_private_base_url,
         )
 
     if config.llm_provider in ("openai", "ollama", "vllm", "llama-cpp", "sglang", "gemini", "openrouter"):
@@ -251,6 +256,7 @@ def _build_raw_llm_provider(config: WorkerConfig) -> LLMProvider:
             provider_name=config.llm_provider,
             disable_thinking=disable_thinking,
             timeout=float(config.llm_timeout) if config.llm_timeout else None,
+            allow_private_base_url=config.llm_allow_private_base_url,
         )
 
     raise ValueError(
@@ -371,7 +377,11 @@ async def create_report_provider(
     validate_llm_base_url(base_url, allow_private=config.llm_allow_private_base_url)
 
     if provider_name == "anthropic":
-        raw: LLMProvider = AnthropicProvider(api_key=api_key, model=model)
+        raw: LLMProvider = AnthropicProvider(
+            api_key=api_key,
+            model=model,
+            allow_private_base_url=config.llm_allow_private_base_url,
+        )
         effective_base_url: str | None = base_url or None
     else:
         # All other providers use OpenAI-compatible interface
@@ -391,6 +401,7 @@ async def create_report_provider(
             base_url=base_url,
             provider_name=provider_name,
             disable_thinking=disable_thinking,
+            allow_private_base_url=config.llm_allow_private_base_url,
         )
         effective_base_url = base_url or None
 
