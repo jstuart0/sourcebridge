@@ -547,14 +547,31 @@ async def test_wrapper_rate_limits_with_real_aiolimiter() -> None:
     wrapped = ConcurrencyGatedProvider(provider, gate, config)
     wrapped._limiter = AsyncLimiter(max_rate=2, time_period=1.0)  # type: ignore[assignment]
 
-    for _ in range(3):
+    # AsyncLimiter starts with the bucket full (max_rate tokens available),
+    # so the first 2 calls drain the bucket instantly with no inter-call
+    # spacing — that is the documented leaky-bucket behavior, not a bug.
+    # To verify rate-limiting kicks in we need to observe the limiter
+    # ENFORCING a wait, which only happens on the (max_rate+1)-th call.
+    # We make 5 calls and assert at least 3 of the 4 inter-call gaps are
+    # ≥ 0.35s (allowing one near-zero burst-paired gap at the start) AND
+    # that total wall-clock time is ≥ 1.4s (5 calls / 2 calls per second
+    # = floor of 2s, minus the initial 2-token burst that goes free).
+    start = asyncio.get_event_loop().time()
+    for _ in range(5):
         await wrapped.complete("test")
+    elapsed = asyncio.get_event_loop().time() - start
 
-    assert len(call_times) == 3
-    # Each successive call should be spaced ≥ 0.4s apart (2 calls/sec).
-    for i in range(1, len(call_times)):
-        gap = call_times[i] - call_times[i - 1]
-        assert gap >= 0.4, f"Gap {gap:.3f}s too small (expected ≥ 0.4s at 2 calls/sec)"
+    assert len(call_times) == 5
+    gaps = [call_times[i] - call_times[i - 1] for i in range(1, len(call_times))]
+    paced_gaps = [g for g in gaps if g >= 0.35]
+    assert len(paced_gaps) >= 3, (
+        f"expected ≥3 of 4 gaps ≥0.35s once burst tokens drain, "
+        f"got gaps={[f'{g:.3f}' for g in gaps]}"
+    )
+    assert elapsed >= 1.4, (
+        f"5 calls at 2/sec should take ≥1.4s wall-clock (with 2-token "
+        f"initial burst), got {elapsed:.3f}s"
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────

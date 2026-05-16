@@ -302,7 +302,7 @@ func TestIntegration_MigrationLegacyCiphertextPreserved(t *testing.T) {
 	// Migration must copy ciphertext bytes-for-bytes (codex-H5).
 	hs := newHelperStores(t, "test-key", false)
 	ctx := context.Background()
-	if err := hs.lcs.SaveLLMConfig(&LLMConfigRecord{
+	if err := hs.lcs.SaveLLMConfig(ctx, &LLMConfigRecord{
 		Provider:     "anthropic",
 		APIKey:       "secret-bytes",
 		SummaryModel: "model-x",
@@ -358,7 +358,7 @@ func TestIntegration_MigrationHardStopOnPlaintextNoKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Plant a plaintext legacy api_key via the allow-unenc store.
-	if err := lcs.SaveLLMConfig(&LLMConfigRecord{
+	if err := lcs.SaveLLMConfig(ctx, &LLMConfigRecord{
 		Provider: "anthropic",
 		APIKey:   "plaintext-leak",
 	}); err != nil {
@@ -617,7 +617,7 @@ func TestIntegration_LegacyWriteReconciledByResolver(t *testing.T) {
 	}
 	// Simulate an old-pod legacy SaveLLMConfig (this exact code path
 	// runs at internal/db/llm_config_store.go:347).
-	if err := hs.lcs.SaveLLMConfig(&LLMConfigRecord{
+	if err := hs.lcs.SaveLLMConfig(ctx, &LLMConfigRecord{
 		Provider:     "old-pod-provider",
 		APIKey:       "old-pod-key",
 		SummaryModel: "old-pod-model",
@@ -669,7 +669,7 @@ func TestIntegration_ConcurrentReconcileOneWins(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Synthetic old-pod write.
-	if err := hs.lcs.SaveLLMConfig(&LLMConfigRecord{Provider: "old", APIKey: "k"}); err != nil {
+	if err := hs.lcs.SaveLLMConfig(ctx, &LLMConfigRecord{Provider: "old", APIKey: "k"}); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ := hs.lcs.LoadConfigSnapshot(ctx)
@@ -728,7 +728,7 @@ func TestIntegration_MultipleOldPodWritesAccumulate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, prov := range []string{"prov-1", "prov-2", "prov-3"} {
-		if err := hs.lcs.SaveLLMConfig(&LLMConfigRecord{Provider: prov, APIKey: "k", SummaryModel: prov + "-m"}); err != nil {
+		if err := hs.lcs.SaveLLMConfig(ctx, &LLMConfigRecord{Provider: prov, APIKey: "k", SummaryModel: prov + "-m"}); err != nil {
 			t.Fatalf("legacy save %d: %v", i, err)
 		}
 	}

@@ -34,6 +34,18 @@ func newTestOrchestrator(t *testing.T, cfg Config) *Orchestrator {
 		cfg.Retry = RetryPolicy{MaxAttempts: 1} // no retries by default in tests
 	}
 	cfg.SkipStartupReconciliation = true
+	// Tests setting MaxConcurrency: 0 want jobs to stay pending — they drive
+	// the state machine manually (SetStatus / backdate / reapStaleJobs). But
+	// Config.withDefaults silently replaces MaxConcurrency<=0 with 3, so
+	// without this guard the test sees 3 workers race its manual writes:
+	// runJob calls SetStatus(Generating) which overwrites UpdatedAt AFTER
+	// backdate runs, leaving age=~0 and the reaper skipping the job (CA-291
+	// root cause). DisableWorkers genuinely skips worker spawn while keeping
+	// MaxConcurrency=3 for any other invariant the orchestrator computes
+	// from the configured size.
+	if cfg.MaxConcurrency == 0 {
+		cfg.DisableWorkers = true
+	}
 	store := llm.NewMemStore()
 	orch := New(store, cfg)
 	t.Cleanup(func() { _ = orch.Shutdown(2 * time.Second) })

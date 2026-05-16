@@ -82,6 +82,18 @@ type Config struct {
 	// (the zero value) so reconciliation runs automatically on every startup.
 	// See reconcileZombieJobs for the reconciliation semantics.
 	SkipStartupReconciliation bool
+	// DisableWorkers, when true, prevents the orchestrator from spawning any
+	// worker goroutines that dequeue from the job channels. Tests that
+	// manually drive the job state machine (Enqueue → SetStatus(Generating)
+	// → backdate → reapStaleJobs) set this so the workers do not race the
+	// test's manual writes — a real worker would call SetStatus(Generating)
+	// from runJob (line ~1359) and overwrite the test's backdated UpdatedAt
+	// timestamp before the assertion runs, causing flaky failures.
+	//
+	// Production callers MUST leave this false (the zero value). The
+	// orchestrator without workers will accept Enqueue calls and queue work,
+	// but nothing will ever drain the queue, so jobs stay pending forever.
+	DisableWorkers bool
 }
 
 // withDefaults returns a copy of c with zero fields replaced by sane defaults.
@@ -215,8 +227,13 @@ func New(store llm.JobStore, cfg Config) *Orchestrator {
 		o.reconcileZombieJobs()
 	}
 	o.workerMu.Lock()
-	for i := 0; i < cfg.MaxConcurrency; i++ {
-		o.startWorkerLocked()
+	// DisableWorkers is a test-only flag: skip worker startup so the test
+	// can drive job state directly without races against runJob's SetStatus.
+	// Production callers always leave it false.
+	if !cfg.DisableWorkers {
+		for i := 0; i < cfg.MaxConcurrency; i++ {
+			o.startWorkerLocked()
+		}
 	}
 	o.workerMu.Unlock()
 	// Start stale job reaper — marks jobs stuck in pending/generating
