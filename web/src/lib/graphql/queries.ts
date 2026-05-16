@@ -1096,6 +1096,36 @@ export const EXPLAIN_SYSTEM_MUTATION = gql`
       model
       inputTokens
       outputTokens
+      references {
+        kind
+        symbol {
+          symbolId
+          qualifiedName
+          filePath
+          startLine
+          endLine
+          language
+        }
+        fileRange {
+          filePath
+          startLine
+          endLine
+        }
+        requirement {
+          externalId
+          filePath
+        }
+      }
+      relatedRequirements
+    }
+  }
+`;
+
+export const ENRICH_ALL_REQUIREMENTS_MUTATION = gql`
+  mutation EnrichAllRequirements($repositoryId: ID!, $force: Boolean, $batchSize: Int) {
+    enrichAllRequirements(repositoryId: $repositoryId, force: $force, batchSize: $batchSize) {
+      jobId
+      requirementsQueued
     }
   }
 `;

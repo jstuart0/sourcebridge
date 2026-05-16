@@ -11,6 +11,41 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 )
 
+// applyEnrichSuggestions applies the merge/replace logic from an LLM enrich
+// response onto an existing requirement. It is the canonical implementation
+// of the CA-88 merge semantics and must be the only site that implements them.
+//
+//   - Tags: SET UNION (existing + suggested) unless forceReplace=true.
+//   - Priority: only updated when forceReplace=true OR the current value is
+//     "" or "unset". This preserves deliberate user edits while populating
+//     empty fields.
+//
+// Returns the computed (newTags, newPriority) pair ready for UpdateRequirementFields.
+func applyEnrichSuggestions(
+	existingTags []string,
+	existingPriority string,
+	suggestedTags []string,
+	suggestedPriority string,
+	forceReplace bool,
+) (newTags []string, newPriority string) {
+	newTags = existingTags
+	if len(suggestedTags) > 0 {
+		if forceReplace {
+			newTags = suggestedTags
+		} else {
+			newTags = mergeUniqueStrings(existingTags, suggestedTags)
+		}
+	}
+
+	newPriority = existingPriority
+	if suggestedPriority != "" {
+		if forceReplace || existingPriority == "" || existingPriority == "unset" {
+			newPriority = suggestedPriority
+		}
+	}
+	return newTags, newPriority
+}
+
 // mergeUniqueStrings returns the sorted union of a and b with no duplicates.
 // Order is deterministic (sorted) so callers can assert equality in tests.
 func mergeUniqueStrings(a, b []string) []string {

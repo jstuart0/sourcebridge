@@ -1112,24 +1112,11 @@ func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID 
 		return nil, fmt.Errorf("worker enrich failed: %w", err)
 	}
 
-	// Tags: SET UNION (existing + suggested) unless force=true (replace).
-	newTags := req.Tags
-	if len(resp.SuggestedTags) > 0 {
-		if forceReplace {
-			newTags = resp.SuggestedTags
-		} else {
-			newTags = mergeUniqueStrings(req.Tags, resp.SuggestedTags)
-		}
-	}
-
-	// Priority: only update when force=true OR the current value is unset.
-	// This preserves deliberate user edits while still populating an empty field.
-	newPriority := req.Priority
-	if resp.SuggestedPriority != "" {
-		if forceReplace || req.Priority == "" || req.Priority == "unset" {
-			newPriority = resp.SuggestedPriority
-		}
-	}
+	newTags, newPriority := applyEnrichSuggestions(
+		req.Tags, req.Priority,
+		resp.SuggestedTags, resp.SuggestedPriority,
+		forceReplace,
+	)
 
 	updated := r.getStore(ctx).UpdateRequirementFields(ctx, requirementID, graphstore.RequirementUpdate{
 		Priority: &newPriority,
@@ -1154,6 +1141,12 @@ func (r *mutationResolver) EnrichAllRequirements(ctx context.Context, repository
 		return nil, fmt.Errorf("orchestrator not available")
 	}
 
+	// CA-B-X-H1: bulk enrichment is admin-only — it fans out unbounded LLM calls
+	// across an entire repository. Per-requirement enrichment remains user-callable.
+	if !currentUserIsAdmin(ctx) {
+		return nil, fmt.Errorf("admin role required for bulk enrichment")
+	}
+
 	repo := r.getStore(ctx).GetRepository(ctx, repositoryID)
 	if repo == nil {
 		return nil, fmt.Errorf("repository not found: %s", repositoryID)
@@ -1169,8 +1162,20 @@ func (r *mutationResolver) EnrichAllRequirements(ctx context.Context, repository
 		batch = 100
 	}
 
-	// Load all requirements; filter to unenriched unless force=true.
-	allReqs, _ := r.getStore(ctx).GetRequirements(ctx, repositoryID, 10000, 0)
+	// Load cap: default 500, configurable via Config.Auth.BulkEnrichMaxRequirements.
+	// Prevents accidentally queuing thousands of LLM calls in a single mutation.
+	loadCap := 500
+	if r.Deps.Config != nil && r.Deps.Config.Auth.BulkEnrichMaxRequirements > 0 {
+		loadCap = r.Deps.Config.Auth.BulkEnrichMaxRequirements
+	}
+
+	// Inflight guard: the orchestrator deduplicates by TargetKey at the DB level
+	// (orchestrator/orchestrator.go:GetActiveByTargetKey). A concurrent call with
+	// the same TargetKey returns the already-running job rather than enqueuing
+	// a new one — so re-submission is safe and idempotent.
+
+	// Load requirements up to the cap; filter to unenriched unless force=true.
+	allReqs, _ := r.getStore(ctx).GetRequirements(ctx, repositoryID, loadCap, 0)
 	var toEnrich []*graphstore.StoredRequirement
 	for _, req := range allReqs {
 		if forceReplace || (len(req.Tags) == 0 && (req.Priority == "" || req.Priority == "unset")) {
@@ -1236,20 +1241,11 @@ func (r *mutationResolver) EnrichAllRequirements(ctx context.Context, repository
 						continue
 					}
 
-					newTags := req.Tags
-					if len(resp.SuggestedTags) > 0 {
-						if forceReplace {
-							newTags = resp.SuggestedTags
-						} else {
-							newTags = mergeUniqueStrings(req.Tags, resp.SuggestedTags)
-						}
-					}
-					newPriority := req.Priority
-					if resp.SuggestedPriority != "" {
-						if forceReplace || req.Priority == "" || req.Priority == "unset" {
-							newPriority = resp.SuggestedPriority
-						}
-					}
+					newTags, newPriority := applyEnrichSuggestions(
+						req.Tags, req.Priority,
+						resp.SuggestedTags, resp.SuggestedPriority,
+						forceReplace,
+					)
 					r.getStore(runCtx).UpdateRequirementFields(runCtx, req.ID, graphstore.RequirementUpdate{
 						Priority: &newPriority,
 						Tags:     &newTags,

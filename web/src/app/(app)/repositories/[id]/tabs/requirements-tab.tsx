@@ -6,12 +6,14 @@ import { useClient, useQuery, useMutation } from "urql";
 import {
   REQUIREMENTS_QUERY,
   AUTO_LINK_MUTATION,
+  ENRICH_ALL_REQUIREMENTS_MUTATION,
   IMPORT_REQUIREMENTS_MUTATION,
 } from "@/lib/graphql/queries";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { CreateRequirementDialog } from "@/components/requirements/CreateRequirementDialog";
 import { trackEvent } from "@/lib/telemetry";
+import { useCurrentUser, isAdminRole } from "@/lib/current-user";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -23,6 +25,7 @@ interface ReqNode {
   title: string;
   source: string;
   priority: string;
+  tags?: string[];
 }
 
 interface RequirementsTabProps {
@@ -49,6 +52,9 @@ export function RequirementsTab({
   const [createRequirementOpen, setCreateRequirementOpen] = useState(false);
   const [linkResult, setLinkResult] = useState<string | null>(null);
   const [importContent, setImportContent] = useState("");
+
+  const currentUser = useCurrentUser();
+  const isAdmin = isAdminRole(currentUser?.role);
 
   const [reqsResult, reexecuteRequirements] = useQuery({
     query: REQUIREMENTS_QUERY,
@@ -100,6 +106,7 @@ export function RequirementsTab({
   const reqs: ReqNode[] = [...initialReqs, ...extraReqs];
 
   const [, autoLink] = useMutation(AUTO_LINK_MUTATION);
+  const [, enrichAll] = useMutation(ENRICH_ALL_REQUIREMENTS_MUTATION);
   const [, importReqs] = useMutation(IMPORT_REQUIREMENTS_MUTATION);
 
   async function handleAutoLink() {
@@ -115,6 +122,26 @@ export function RequirementsTab({
     });
   }
 
+  async function handleEnrichAll() {
+    await runAiOp("requirements:enrich-all", async () => {
+      setLinkResult(null);
+      trackEvent({ event: "requirements_enrich_all", repositoryId: repoId });
+      const res = await enrichAll({ repositoryId: repoId, batchSize: 10 });
+      if (res.data?.enrichAllRequirements) {
+        const { requirementsQueued, jobId } = res.data.enrichAllRequirements;
+        if (requirementsQueued === 0) {
+          setLinkResult("All requirements already enriched — nothing to do.");
+        } else {
+          setLinkResult(
+            `Enriching ${requirementsQueued} requirements in the background (job ${jobId}). Progress is visible on the admin Monitor page.`
+          );
+        }
+      } else if (res.error) {
+        setLinkResult(`Enrich all failed: ${res.error.message}`);
+      }
+    });
+  }
+
   async function handleImportReqs() {
     if (!importContent.trim()) return;
     trackEvent({ event: "requirements_imported", repositoryId: repoId });
@@ -123,6 +150,16 @@ export function RequirementsTab({
   }
 
   const autoLinkBusy = isAiLoading("requirements:auto-link");
+  const enrichAllBusy = isAiLoading("requirements:enrich-all");
+
+  // Enrich all is visible to admins only. Non-admin users don't see the button
+  // to avoid confusing 403s (the backend gate returns a clear error if called).
+  // Mirrors the resolver's unenriched filter: no tags AND priority empty/unset.
+  const hasUnenriched = reqs.some(
+    (req) =>
+      (!req.tags || req.tags.length === 0) &&
+      (!req.priority || req.priority === "unset")
+  );
 
   const listContainerClass = "max-h-[60vh] overflow-y-auto";
   const listRowClass =
@@ -137,6 +174,20 @@ export function RequirementsTab({
         <Button variant="secondary" onClick={handleAutoLink} disabled={autoLinkBusy}>
           {autoLinkBusy ? "Linking..." : "Auto-Link Specs to Code"}
         </Button>
+        {isAdmin && (
+          <Button
+            variant="secondary"
+            onClick={handleEnrichAll}
+            disabled={enrichAllBusy || !hasUnenriched}
+            title={
+              !hasUnenriched
+                ? "All visible requirements already have tags and priority"
+                : "Enrich unenriched requirements with AI-suggested tags and priority (admin only)"
+            }
+          >
+            {enrichAllBusy ? "Enriching..." : "Enrich All"}
+          </Button>
+        )}
       </div>
       {linkResult && (
         <div className={`mb-4 rounded-[var(--control-radius)] border px-3 py-2 text-sm ${linkResult.startsWith("Auto-link failed") ? "border-red-500/30 bg-red-500/10 text-red-500" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"}`}>

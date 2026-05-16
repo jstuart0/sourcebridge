@@ -12,6 +12,57 @@ import (
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
 )
 
+// ── applyEnrichSuggestions ───────────────────────────────────────────────────
+
+func TestApplyEnrichSuggestions_ForceFalse_MergesTags_KeepsPriority(t *testing.T) {
+	newTags, newPriority := applyEnrichSuggestions(
+		[]string{"existing"}, "high",
+		[]string{"new-tag"}, "low",
+		false,
+	)
+	if len(newTags) != 2 {
+		t.Errorf("tags: expected 2, got %v", newTags)
+	}
+	if newPriority != "high" {
+		t.Errorf("priority: expected 'high' (preserved), got %q", newPriority)
+	}
+}
+
+func TestApplyEnrichSuggestions_ForceTrue_ReplacesBoth(t *testing.T) {
+	newTags, newPriority := applyEnrichSuggestions(
+		[]string{"existing"}, "high",
+		[]string{"new-tag"}, "critical",
+		true,
+	)
+	if len(newTags) != 1 || newTags[0] != "new-tag" {
+		t.Errorf("tags: expected [new-tag], got %v", newTags)
+	}
+	if newPriority != "critical" {
+		t.Errorf("priority: expected 'critical', got %q", newPriority)
+	}
+}
+
+func TestApplyEnrichSuggestions_EmptyExistingPriority_GetsSet(t *testing.T) {
+	_, newPriority := applyEnrichSuggestions(nil, "", nil, "medium", false)
+	if newPriority != "medium" {
+		t.Errorf("expected 'medium', got %q", newPriority)
+	}
+}
+
+func TestApplyEnrichSuggestions_UnsetExistingPriority_GetsSet(t *testing.T) {
+	_, newPriority := applyEnrichSuggestions(nil, "unset", nil, "low", false)
+	if newPriority != "low" {
+		t.Errorf("expected 'low', got %q", newPriority)
+	}
+}
+
+func TestApplyEnrichSuggestions_NoSuggestedTags_KeepsExisting(t *testing.T) {
+	newTags, _ := applyEnrichSuggestions([]string{"a", "b"}, "high", nil, "", false)
+	if len(newTags) != 2 {
+		t.Errorf("expected existing tags preserved, got %v", newTags)
+	}
+}
+
 // ── mergeUniqueStrings ───────────────────────────────────────────────────────
 
 func TestMergeUniqueStrings_Disjoint(t *testing.T) {

@@ -44,6 +44,16 @@ type AuthConfig struct {
 	// Config key: auth.login_rate_limit_window_secs
 	// Env var:    SOURCEBRIDGE_AUTH_LOGIN_RATE_LIMIT_WINDOW_SECS
 	LoginRateLimitWindowSecs int `mapstructure:"login_rate_limit_window_secs"`
+
+	// BulkEnrichMaxRequirements caps the number of requirements loaded per
+	// enrichAllRequirements invocation. Prevents accidentally queuing thousands
+	// of LLM calls in a single mutation on large repositories. Default 500.
+	// Operators who need a higher cap (e.g. for scheduled bulk re-baselining)
+	// set this via SOURCEBRIDGE_AUTH_BULK_ENRICH_MAX_REQUIREMENTS.
+	//
+	// Config key: auth.bulk_enrich_max_requirements
+	// Env var:    SOURCEBRIDGE_AUTH_BULK_ENRICH_MAX_REQUIREMENTS
+	BulkEnrichMaxRequirements int `mapstructure:"bulk_enrich_max_requirements"`
 }
 
 // Config holds the complete application configuration.
@@ -875,9 +885,10 @@ func Defaults() *Config {
 			AllowPrivateBaseURL: true,
 		},
 		Auth: AuthConfig{
-			PasswordMinLength:        8,   // CA-215: default 8 preserves current behavior
-			LoginRateLimitPerUser:    5,   // CA-339/CA-207: 5 attempts per window
-			LoginRateLimitWindowSecs: 300, // CA-339/CA-207: 5-minute sliding window
+			PasswordMinLength:          8,   // CA-215: default 8 preserves current behavior
+			LoginRateLimitPerUser:      5,   // CA-339/CA-207: 5 attempts per window
+			LoginRateLimitWindowSecs:   300, // CA-339/CA-207: 5-minute sliding window
+			BulkEnrichMaxRequirements:  500, // CA-B-X-H1: default 500; raise for large repos
 		},
 		Linking: LinkingConfig{
 			MinConfidenceUI:        0.5,
@@ -1070,6 +1081,7 @@ func Load() (*Config, error) {
 	v.SetDefault("auth.password_min_length", cfg.Auth.PasswordMinLength)
 	v.SetDefault("auth.login_rate_limit_per_user", cfg.Auth.LoginRateLimitPerUser)
 	v.SetDefault("auth.login_rate_limit_window_secs", cfg.Auth.LoginRateLimitWindowSecs)
+	v.SetDefault("auth.bulk_enrich_max_requirements", cfg.Auth.BulkEnrichMaxRequirements)
 	v.SetDefault("change_watch.enabled", cfg.ChangeWatch.Enabled)
 	v.SetDefault("change_watch.debounce_ms", cfg.ChangeWatch.DebounceMs)
 	v.SetDefault("change_watch.rate_limit_per_min", cfg.ChangeWatch.RateLimitPerMin)
