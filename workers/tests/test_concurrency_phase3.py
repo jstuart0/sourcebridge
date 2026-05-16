@@ -1124,6 +1124,26 @@ async def test_registry_rejects_lookup_after_close() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ensure_gate_sync_raises_when_registry_closed() -> None:
+    """Pin the synchronous close-registry guard in ensure_gate_sync.
+
+    The async ConcurrencyRegistry.lookup path is already tested by
+    test_registry_rejects_lookup_after_close above.  The ensure_gate_sync
+    path (used by per-request override providers) has its own
+    ``if self._closed: raise RuntimeError(...)`` guard that is structurally
+    distinct and must be pinned separately (CA-483 / T-M2).
+    """
+    reg = _registry()
+    await reg.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        reg.ensure_gate_sync(
+            provider="ollama",
+            base_url="http://localhost:11434",
+            kind="llm",
+        )
+
+
+@pytest.mark.asyncio
 async def test_registry_close_during_in_flight_calls() -> None:
     """Registry.close() can be called while a gate slot is held.
 

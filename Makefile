@@ -5,7 +5,7 @@
 	test-livingwiki-integration test-livingwiki-smoke test-scripts \
 	benchmark-comprehension-fake benchmark-comprehension-local benchmark-comprehension-report \
 	benchmark-report-quality-live \
-	check-telemetry-disclosure
+	check-telemetry-disclosure check-csp-soak-deadline
 
 GO_BIN = bin/sourcebridge
 GO_MIGRATE_BIN = bin/migrate
@@ -94,6 +94,18 @@ check-telemetry-disclosure:
 	@grep -q '`queries_30d`' TELEMETRY.md || (echo "TELEMETRY.md missing queries_30d disclosure"; exit 1)
 	@grep -q '`artifacts_generated_30d`' TELEMETRY.md || (echo "TELEMETRY.md missing artifacts_generated_30d disclosure"; exit 1)
 	@echo "telemetry disclosure: ok"
+
+# CSP soak deadline gate: fails after 2026-05-29 if continue-on-error is still
+# present in the CSP check workflow, reminding the operator to remove it.
+# CA-487 / T-L2.
+check-csp-soak-deadline:
+	@DEADLINE_EPOCH=$$(date -j -f "%Y-%m-%d" "2026-05-29" "+%s" 2>/dev/null || date -d "2026-05-29" +%s); \
+	NOW_EPOCH=$$(date +%s); \
+	if [ "$$NOW_EPOCH" -ge "$$DEADLINE_EPOCH" ] && grep -q "continue-on-error: true" .github/workflows/csp-check.yml; then \
+		echo "ERROR: CSP soak deadline (2026-05-29) has passed and continue-on-error: true is still present in .github/workflows/csp-check.yml — remove it to enforce the CSP gate"; \
+		exit 1; \
+	fi
+	@echo "csp-soak-deadline: ok"
 
 # Package the VS Code extension as a VSIX. The output file lands in
 # plugins/vscode/ and is gitignored. Use `install-vscode` to drop it

@@ -103,6 +103,16 @@ jobs:
           npm ci
           npm test
 
+  check-gates:
+    name: Makefile disclosure + deadline gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Telemetry disclosure gate
+        run: make check-telemetry-disclosure
+      - name: CSP soak deadline gate
+        run: make check-csp-soak-deadline
+
   proto-gen:
     runs-on: ubuntu-latest
     steps:
