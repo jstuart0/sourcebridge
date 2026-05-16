@@ -13,7 +13,7 @@ Covers:
 from __future__ import annotations
 
 import socket
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -36,9 +36,8 @@ def _addrinfo(ip: str) -> list:
 async def test_cloud_metadata_ip_always_blocked_allow_private_false():
     """169.254.169.254 (AWS IMDS) is blocked even when allow_private=False."""
     transport = RebindGuardedTransport(allow_private=False)
-    with patch("socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")):
-        with pytest.raises(httpx.ConnectError, match="dns-rebind-guard"):
-            await transport.handle_async_request(_make_request("attacker.example.com"))
+    with patch("socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")), pytest.raises(httpx.ConnectError, match="dns-rebind-guard"):
+        await transport.handle_async_request(_make_request("attacker.example.com"))
 
 
 @pytest.mark.asyncio
@@ -49,9 +48,8 @@ async def test_cloud_metadata_ip_always_blocked_allow_private_true():
     NOT accidentally get IMDS access.
     """
     transport = RebindGuardedTransport(allow_private=True)
-    with patch("socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")):
-        with pytest.raises(httpx.ConnectError, match="dns-rebind-guard"):
-            await transport.handle_async_request(_make_request("attacker.example.com"))
+    with patch("socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")), pytest.raises(httpx.ConnectError, match="dns-rebind-guard"):
+        await transport.handle_async_request(_make_request("attacker.example.com"))
 
 
 @pytest.mark.asyncio
@@ -59,18 +57,16 @@ async def test_ipv6_link_local_always_blocked():
     """fe80::1 (IPv6 link-local) is blocked regardless of allow_private."""
     transport = RebindGuardedTransport(allow_private=True)
     ipv6_addrinfo = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("fe80::1", 443, 0, 0))]
-    with patch("socket.getaddrinfo", return_value=ipv6_addrinfo):
-        with pytest.raises(httpx.ConnectError, match="dns-rebind-guard"):
-            await transport.handle_async_request(_make_request("attacker.example.com"))
+    with patch("socket.getaddrinfo", return_value=ipv6_addrinfo), pytest.raises(httpx.ConnectError, match="dns-rebind-guard"):
+        await transport.handle_async_request(_make_request("attacker.example.com"))
 
 
 @pytest.mark.asyncio
 async def test_private_ip_blocked_when_allow_private_false():
     """192.168.1.1 is blocked when allow_private=False."""
     transport = RebindGuardedTransport(allow_private=False)
-    with patch("socket.getaddrinfo", return_value=_addrinfo("192.168.1.1")):
-        with pytest.raises(httpx.ConnectError, match="dns-rebind-guard"):
-            await transport.handle_async_request(_make_request("internal.example.com"))
+    with patch("socket.getaddrinfo", return_value=_addrinfo("192.168.1.1")), pytest.raises(httpx.ConnectError, match="dns-rebind-guard"):
+        await transport.handle_async_request(_make_request("internal.example.com"))
 
 
 @pytest.mark.asyncio
@@ -85,13 +81,12 @@ async def test_private_ip_allowed_when_allow_private_true(monkeypatch):
     fake_response = httpx.Response(200, content=b"{}")
     super_mock = AsyncMock(return_value=fake_response)
 
-    with patch("socket.getaddrinfo", return_value=_addrinfo("192.168.1.1")):
-        with patch.object(
-            httpx.AsyncHTTPTransport,
-            "handle_async_request",
-            new=super_mock,
-        ):
-            resp = await transport.handle_async_request(_make_request("ollama.internal"))
+    with patch("socket.getaddrinfo", return_value=_addrinfo("192.168.1.1")), patch.object(
+        httpx.AsyncHTTPTransport,
+        "handle_async_request",
+        new=super_mock,
+    ):
+        resp = await transport.handle_async_request(_make_request("ollama.internal"))
 
     assert resp.status_code == 200
     super_mock.assert_awaited_once()
@@ -105,13 +100,12 @@ async def test_public_ip_allowed_allow_private_false(monkeypatch):
     fake_response = httpx.Response(200, content=b"{}")
     super_mock = AsyncMock(return_value=fake_response)
 
-    with patch("socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
-        with patch.object(
-            httpx.AsyncHTTPTransport,
-            "handle_async_request",
-            new=super_mock,
-        ):
-            resp = await transport.handle_async_request(_make_request("api.openai.com"))
+    with patch("socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")), patch.object(
+        httpx.AsyncHTTPTransport,
+        "handle_async_request",
+        new=super_mock,
+    ):
+        resp = await transport.handle_async_request(_make_request("api.openai.com"))
 
     assert resp.status_code == 200
     super_mock.assert_awaited_once()
@@ -125,13 +119,12 @@ async def test_gaierror_propagates_to_super(monkeypatch):
     fake_response = httpx.Response(200, content=b"{}")
     super_mock = AsyncMock(return_value=fake_response)
 
-    with patch("socket.getaddrinfo", side_effect=socket.gaierror("no such host")):
-        with patch.object(
-            httpx.AsyncHTTPTransport,
-            "handle_async_request",
-            new=super_mock,
-        ):
-            resp = await transport.handle_async_request(_make_request("does-not-exist.invalid"))
+    with patch("socket.getaddrinfo", side_effect=socket.gaierror("no such host")), patch.object(
+        httpx.AsyncHTTPTransport,
+        "handle_async_request",
+        new=super_mock,
+    ):
+        resp = await transport.handle_async_request(_make_request("does-not-exist.invalid"))
 
     # guard did not raise; httpx's normal unresolvable-host path fires
     assert resp.status_code == 200
@@ -150,18 +143,16 @@ async def test_ip_literal_cloud_metadata_blocked():
     req = _make_request("169.254.169.254")
     assert req.url.host == "169.254.169.254"
 
-    with patch("socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")):
-        with pytest.raises(httpx.ConnectError, match="dns-rebind-guard"):
-            await transport.handle_async_request(req)
+    with patch("socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")), pytest.raises(httpx.ConnectError, match="dns-rebind-guard"):
+        await transport.handle_async_request(req)
 
 
 @pytest.mark.asyncio
 async def test_loopback_blocked_allow_private_false():
     """127.0.0.1 is blocked when allow_private=False."""
     transport = RebindGuardedTransport(allow_private=False)
-    with patch("socket.getaddrinfo", return_value=_addrinfo("127.0.0.1")):
-        with pytest.raises(httpx.ConnectError, match="dns-rebind-guard"):
-            await transport.handle_async_request(_make_request("localhost"))
+    with patch("socket.getaddrinfo", return_value=_addrinfo("127.0.0.1")), pytest.raises(httpx.ConnectError, match="dns-rebind-guard"):
+        await transport.handle_async_request(_make_request("localhost"))
 
 
 @pytest.mark.asyncio
@@ -172,13 +163,12 @@ async def test_loopback_allowed_allow_private_true(monkeypatch):
     fake_response = httpx.Response(200, content=b"{}")
     super_mock = AsyncMock(return_value=fake_response)
 
-    with patch("socket.getaddrinfo", return_value=_addrinfo("127.0.0.1")):
-        with patch.object(
-            httpx.AsyncHTTPTransport,
-            "handle_async_request",
-            new=super_mock,
-        ):
-            resp = await transport.handle_async_request(_make_request("localhost"))
+    with patch("socket.getaddrinfo", return_value=_addrinfo("127.0.0.1")), patch.object(
+        httpx.AsyncHTTPTransport,
+        "handle_async_request",
+        new=super_mock,
+    ):
+        resp = await transport.handle_async_request(_make_request("localhost"))
 
     assert resp.status_code == 200
     super_mock.assert_awaited_once()
