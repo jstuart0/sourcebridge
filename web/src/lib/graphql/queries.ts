@@ -686,8 +686,8 @@ export const PLATFORM_STATS_QUERY = gql`
 `;
 
 export const ENRICH_REQUIREMENT_MUTATION = gql`
-  mutation EnrichRequirement($requirementId: ID!) {
-    enrichRequirement(requirementId: $requirementId) {
+  mutation EnrichRequirement($requirementId: ID!, $force: Boolean) {
+    enrichRequirement(requirementId: $requirementId, force: $force) {
       id
       externalId
       title

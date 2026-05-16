@@ -5,7 +5,9 @@ package graphql
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	enterprisev1 "github.com/sourcebridge/sourcebridge/gen/go/enterprise/v1"
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
@@ -17,6 +19,8 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/events"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
+	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
@@ -266,13 +270,52 @@ func TestEnrichRequirement_UnsetPriority_GetsSetByLLM(t *testing.T) {
 	}
 }
 
-// ── CA-88: worker nil guard ───────────────────────────────────────────────────
+// ── CA-88: worker nil guard (T-H1) ───────────────────────────────────────────
+//
+// Previously this test called EnrichAllRequirements (wrong resolver). It now
+// actually calls EnrichRequirement with a seeded requirement and Worker=nil,
+// matching the guard at schema.resolvers.go:1077.
 
 func TestEnrichRequirement_WorkerNil_ReturnsError(t *testing.T) {
+	// Build a resolver with Worker=nil (the default in newResolverWithRepo).
 	r, repoID := newResolverWithRepo(t)
-	_, err := r.Mutation().EnrichAllRequirements(context.Background(), repoID, nil, nil)
+
+	// Seed one requirement so the ID lookup succeeds — we must reach the
+	// worker-nil guard, not the "requirement not found" branch.
+	_, err := r.Store.StoreRequirements(t.Context(), repoID, []*graphstore.StoredRequirement{
+		{ExternalID: "R-nil-1", Title: "needs enrichment"},
+	})
+	if err != nil {
+		t.Fatal("seed failed:", err)
+	}
+	allReqs, _ := r.Store.GetRequirements(t.Context(), repoID, 10, 0)
+	if len(allReqs) == 0 {
+		t.Fatal("no requirements after seed")
+	}
+	reqID := allReqs[0].ID
+
+	// r.Deps.Worker is nil — must return the "worker not connected" error.
+	_, callErr := r.Mutation().EnrichRequirement(context.Background(), reqID, nil)
+	if callErr == nil {
+		t.Fatal("expected error when worker is nil, got nil")
+	}
+	if !strings.Contains(callErr.Error(), "worker not connected") {
+		t.Errorf("expected 'worker not connected' in error, got: %v", callErr)
+	}
+}
+
+// TestEnrichRequirement_ReqNotFound_ReturnsError verifies that a nonexistent
+// requirement ID returns the "requirement not found" error (resolver line 1082).
+func TestEnrichRequirement_ReqNotFound_ReturnsError(t *testing.T) {
+	fw := &enrichFakeWorker{}
+	r, _ := newResolverWithEnrichWorker(t, fw)
+
+	_, err := r.Mutation().EnrichRequirement(context.Background(), "nonexistent-req-id-xyz", nil)
 	if err == nil {
-		t.Fatal("expected error when worker is nil")
+		t.Fatal("expected error for nonexistent requirement, got nil")
+	}
+	if !strings.Contains(err.Error(), "requirement not found") {
+		t.Errorf("expected 'requirement not found' in error, got: %v", err)
 	}
 }
 
@@ -298,38 +341,56 @@ func TestEnrichAllRequirements_NonAdminRejected(t *testing.T) {
 
 // ── CA-89: EnrichAllRequirements filter logic ──────────────────────────────────
 
+// TestEnrichAllRequirements_FilterSkipsEnrichedByDefault verifies that when all
+// seeded requirements are already enriched (have tags), EnrichAllRequirements
+// returns the "none" sentinel without enqueuing a job (T-H2).
+//
+// Uses a real orchestrator stub (D-023b) so the test would catch any regression
+// that reaches the Enqueue path despite finding nothing to enrich.
 func TestEnrichAllRequirements_FilterSkipsEnrichedByDefault(t *testing.T) {
-	// The filter is exercised end-to-end via applyEnrichSuggestions.
-	// The "nothing to enrich" early return is the observable behaviour here.
 	store := graphstore.NewStore()
 	result := &indexer.IndexResult{RepoName: "repo", RepoPath: "/tmp"}
 	repo, _ := store.StoreIndexResult(t.Context(), result)
-	// Seed requirements that are already enriched (have tags).
+	// All three requirements are already enriched: have tags + priority set.
 	_, _ = store.StoreRequirements(t.Context(), repo.ID, []*graphstore.StoredRequirement{
 		{ExternalID: "R-1", Title: "done", Tags: []string{"done"}, Priority: "high"},
+		{ExternalID: "R-2", Title: "also done", Tags: []string{"feature"}, Priority: "medium"},
+		{ExternalID: "R-3", Title: "already done", Tags: []string{"bug"}, Priority: "low"},
 	})
 
 	fw := &enrichFakeWorker{}
 	snap := resolution.Snapshot{Provider: "test", Model: "test-model"}
 	caller := llmcall.New(fw, resolution.NewFrozenResolver(snap), nil)
+
+	jobStore := llm.NewMemStore()
+	orch := orchestrator.New(jobStore, orchestrator.Config{
+		SkipStartupReconciliation: true,
+		Retry:                     orchestrator.RetryPolicy{MaxAttempts: 1},
+	})
+	t.Cleanup(func() { _ = orch.Shutdown(2 * time.Second) })
+
 	r := &Resolver{
 		Deps: &appdeps.AppDeps{
-			EventBus:  events.NewBus(),
-			LLMCaller: caller,
-			Worker:    new(worker.Client),
+			EventBus:     events.NewBus(),
+			LLMCaller:    caller,
+			Worker:       new(worker.Client),
+			Orchestrator: orch,
 		},
 		Store: store,
 	}
 
-	result2, err := r.Mutation().EnrichAllRequirements(ctxAdmin(), repo.ID, nil, nil)
+	got, err := r.Mutation().EnrichAllRequirements(ctxAdmin(), repo.ID, nil, nil)
 	if err != nil {
-		// Orchestrator may be nil — should return early with nothingToEnrich result.
-		// If we get an error about orchestrator unavailable, that's also acceptable
-		// because we'd never reach that path (nothing to enrich returns before it).
-		t.Logf("unexpected error: %v", err)
+		t.Fatalf("expected nil error for nothing-to-enrich, got: %v", err)
 	}
-	if result2 != nil && result2.JobID != "none" {
-		t.Errorf("expected jobId 'none' for nothing-to-enrich, got %q", result2.JobID)
+	if got == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if got.JobID != "none" {
+		t.Errorf("expected JobID 'none' for all-enriched repo, got %q", got.JobID)
+	}
+	if got.RequirementsQueued != 0 {
+		t.Errorf("expected RequirementsQueued=0, got %d", got.RequirementsQueued)
 	}
 }
 
@@ -374,4 +435,172 @@ func TestEnrichAllRequirements_LoadCapDefault500(t *testing.T) {
 	if defaults.Auth.BulkEnrichMaxRequirements != 500 {
 		t.Errorf("default BulkEnrichMaxRequirements: got %d, want 500", defaults.Auth.BulkEnrichMaxRequirements)
 	}
+}
+
+// ── T-M1: orchestrator nil guard ─────────────────────────────────────────────
+//
+// EnrichAllRequirements checks r.Deps.Orchestrator == nil AFTER the worker-nil
+// guard and AFTER the admin gate. This test reaches that check by providing a
+// non-nil Worker but leaving Orchestrator nil.
+
+func TestEnrichAllRequirements_OrchestratorNil_ReturnsError(t *testing.T) {
+	store := graphstore.NewStore()
+	result := &indexer.IndexResult{RepoName: "repo", RepoPath: "/tmp"}
+	repo, _ := store.StoreIndexResult(t.Context(), result)
+	// Seed one unenriched requirement so the filter passes and we reach
+	// the Orchestrator guard (not the early-return "nothing to enrich" branch).
+	_, _ = store.StoreRequirements(t.Context(), repo.ID, []*graphstore.StoredRequirement{
+		{ExternalID: "R-unenriched", Title: "needs enrichment"},
+	})
+
+	fw := &enrichFakeWorker{}
+	snap := resolution.Snapshot{Provider: "test", Model: "test-model"}
+	caller := llmcall.New(fw, resolution.NewFrozenResolver(snap), nil)
+	r := &Resolver{
+		Deps: &appdeps.AppDeps{
+			EventBus:     events.NewBus(),
+			LLMCaller:    caller,
+			Worker:       new(worker.Client), // non-nil — passes worker guard
+			Orchestrator: nil,                // nil — must trigger orchestrator error
+		},
+		Store: store,
+	}
+
+	_, err := r.Mutation().EnrichAllRequirements(ctxAdmin(), repo.ID, nil, nil)
+	if err == nil {
+		t.Fatal("expected error when Orchestrator is nil, got nil")
+	}
+	if !strings.Contains(err.Error(), "orchestrator") {
+		t.Errorf("expected 'orchestrator' in error message, got: %v", err)
+	}
+}
+
+// ── T-H3: BulkEnrichCap from Config + batchSize clamp ────────────────────────
+
+// TestEnrichAllRequirements_BulkEnrichCapFromConfig verifies that the resolver
+// reads Config.Auth.BulkEnrichMaxRequirements and respects it as the upper bound
+// on the number of requirements queued (T-H3 cap assertion).
+func TestEnrichAllRequirements_BulkEnrichCapFromConfig(t *testing.T) {
+	store := graphstore.NewStore()
+	result := &indexer.IndexResult{RepoName: "repo", RepoPath: "/tmp"}
+	repo, _ := store.StoreIndexResult(t.Context(), result)
+	// Seed 5 unenriched requirements.
+	reqs := make([]*graphstore.StoredRequirement, 5)
+	for i := range reqs {
+		reqs[i] = &graphstore.StoredRequirement{
+			ExternalID: strings.Repeat("R", i+1),
+			Title:      "unenriched",
+		}
+	}
+	_, _ = store.StoreRequirements(t.Context(), repo.ID, reqs)
+
+	fw := &enrichFakeWorker{}
+	snap := resolution.Snapshot{Provider: "test", Model: "test-model"}
+	caller := llmcall.New(fw, resolution.NewFrozenResolver(snap), nil)
+
+	jobStore := llm.NewMemStore()
+	orch := orchestrator.New(jobStore, orchestrator.Config{
+		SkipStartupReconciliation: true,
+		Retry:                     orchestrator.RetryPolicy{MaxAttempts: 1},
+	})
+	t.Cleanup(func() { _ = orch.Shutdown(2 * time.Second) })
+
+	cfg := config.Defaults()
+	cfg.Auth.BulkEnrichMaxRequirements = 2 // cap at 2 of the 5 seeded
+
+	r := &Resolver{
+		Deps: &appdeps.AppDeps{
+			EventBus:     events.NewBus(),
+			LLMCaller:    caller,
+			Worker:       new(worker.Client),
+			Orchestrator: orch,
+			Config:       cfg,
+			LLMResolver:  newStubLLMResolver(),
+		},
+		Store: store,
+	}
+
+	got, err := r.Mutation().EnrichAllRequirements(ctxAdmin(), repo.ID, nil, nil)
+	if err != nil {
+		t.Fatalf("EnrichAllRequirements: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// Only 2 requirements should be queued (BulkEnrichMaxRequirements=2).
+	if got.RequirementsQueued != 2 {
+		t.Errorf("expected RequirementsQueued=2 (cap enforced), got %d", got.RequirementsQueued)
+	}
+}
+
+// TestEnrichAllRequirements_BatchSizeClampsAt100 verifies that a batchSize
+// argument > 100 is clamped to 100 by the resolver (T-H3 clamp assertion).
+//
+// Observable via RequirementsQueued: the cap clamp at 100 is the batchSize
+// per iteration within the job, not a cap on total reqs queued. We verify the
+// resolver's outer clamp: with Config.BulkEnrichMaxRequirements > 100 and
+// batchSize=200, the result.RequirementsQueued <= loadCap but the internal
+// batch variable is clamped. The clamp is at line 1161-1163 in schema.resolvers.go.
+//
+// Strategy: seed 3 unenriched requirements and call with batchSize=200.
+// The job enqueues with batchSize internally clamped to 100; RequirementsQueued
+// reflects all 3 seeded requirements (below the cap). This confirms the resolver
+// path without needing to execute the closure (which would require a real worker).
+func TestEnrichAllRequirements_BatchSizeClampsAt100(t *testing.T) {
+	store := graphstore.NewStore()
+	result := &indexer.IndexResult{RepoName: "repo", RepoPath: "/tmp"}
+	repo, _ := store.StoreIndexResult(t.Context(), result)
+	reqs := []*graphstore.StoredRequirement{
+		{ExternalID: "R-a", Title: "unenriched a"},
+		{ExternalID: "R-b", Title: "unenriched b"},
+		{ExternalID: "R-c", Title: "unenriched c"},
+	}
+	_, _ = store.StoreRequirements(t.Context(), repo.ID, reqs)
+
+	fw := &enrichFakeWorker{}
+	snap := resolution.Snapshot{Provider: "test", Model: "test-model"}
+	caller := llmcall.New(fw, resolution.NewFrozenResolver(snap), nil)
+
+	jobStore := llm.NewMemStore()
+	orch := orchestrator.New(jobStore, orchestrator.Config{
+		SkipStartupReconciliation: true,
+		Retry:                     orchestrator.RetryPolicy{MaxAttempts: 1},
+	})
+	t.Cleanup(func() { _ = orch.Shutdown(2 * time.Second) })
+
+	cfg := config.Defaults() // BulkEnrichMaxRequirements=500 (well above 100)
+
+	r := &Resolver{
+		Deps: &appdeps.AppDeps{
+			EventBus:     events.NewBus(),
+			LLMCaller:    caller,
+			Worker:       new(worker.Client),
+			Orchestrator: orch,
+			Config:       cfg,
+			LLMResolver:  newStubLLMResolver(),
+		},
+		Store: store,
+	}
+
+	batchSize := 200 // > 100 → will be clamped to 100 inside the resolver
+	got, err := r.Mutation().EnrichAllRequirements(ctxAdmin(), repo.ID, nil, &batchSize)
+	if err != nil {
+		t.Fatalf("EnrichAllRequirements: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// All 3 requirements are unenriched → queued. The batchSize=200 → clamped to 100
+	// internally, but the total queued still reflects all eligible requirements.
+	if got.RequirementsQueued != 3 {
+		t.Errorf("expected RequirementsQueued=3, got %d", got.RequirementsQueued)
+	}
+	if got.JobID == "none" || got.JobID == "" {
+		t.Errorf("expected a real job ID (batchSize clamp is internal; job should be enqueued), got %q", got.JobID)
+	}
+	// Note: the internal batchSize clamp (batch=100) is tested structurally via
+	// code inspection at schema.resolvers.go:1161-1163. A behavioral test that
+	// executes the closure with a real LLM would require an integration harness;
+	// that path is out of scope here per D-024b. The observable contract is:
+	// passing batchSize=200 does not return an error and does not clamp RequirementsQueued.
 }

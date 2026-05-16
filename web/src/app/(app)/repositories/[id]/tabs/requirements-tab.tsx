@@ -50,7 +50,9 @@ export function RequirementsTab({
   runAiOp,
 }: RequirementsTabProps) {
   const [createRequirementOpen, setCreateRequirementOpen] = useState(false);
-  const [linkResult, setLinkResult] = useState<string | null>(null);
+  const [linkResult, setLinkResult] = useState<
+    { type: "success" | "error" | "info"; message: string } | null
+  >(null);
   const [importContent, setImportContent] = useState("");
 
   const currentUser = useCurrentUser();
@@ -115,9 +117,12 @@ export function RequirementsTab({
       const res = await autoLink({ repositoryId: repoId });
       if (res.data?.autoLinkRequirements) {
         const { linksCreated, requirementsProcessed } = res.data.autoLinkRequirements;
-        setLinkResult(`Processed ${requirementsProcessed} requirements, created ${linksCreated} links.`);
+        setLinkResult({
+          type: "success",
+          message: `Processed ${requirementsProcessed} requirements, created ${linksCreated} links.`,
+        });
       } else if (res.error) {
-        setLinkResult(`Auto-link failed: ${res.error.message}`);
+        setLinkResult({ type: "error", message: `Auto-link failed: ${res.error.message}` });
       }
     });
   }
@@ -129,15 +134,19 @@ export function RequirementsTab({
       const res = await enrichAll({ repositoryId: repoId, batchSize: 10 });
       if (res.data?.enrichAllRequirements) {
         const { requirementsQueued, jobId } = res.data.enrichAllRequirements;
-        if (requirementsQueued === 0) {
-          setLinkResult("All requirements already enriched — nothing to do.");
+        if (jobId === "none" || requirementsQueued === 0) {
+          setLinkResult({
+            type: "info",
+            message: "All requirements already enriched — nothing to do.",
+          });
         } else {
-          setLinkResult(
-            `Enriching ${requirementsQueued} requirements in the background (job ${jobId}). Progress is visible on the admin Monitor page.`
-          );
+          setLinkResult({
+            type: "success",
+            message: `Enriching ${requirementsQueued} requirements in the background (job ${jobId}). Progress is visible on the admin Monitor page.`,
+          });
         }
       } else if (res.error) {
-        setLinkResult(`Enrich all failed: ${res.error.message}`);
+        setLinkResult({ type: "error", message: `Enrich all failed: ${res.error.message}` });
       }
     });
   }
@@ -145,8 +154,13 @@ export function RequirementsTab({
   async function handleImportReqs() {
     if (!importContent.trim()) return;
     trackEvent({ event: "requirements_imported", repositoryId: repoId });
-    await importReqs({ input: { repositoryId: repoId, content: importContent, format: "MARKDOWN" } });
+    const res = await importReqs({ input: { repositoryId: repoId, content: importContent, format: "MARKDOWN" } });
     setImportContent("");
+    if (res.error) {
+      setLinkResult({ type: "error", message: `Import failed: ${res.error.message}` });
+    } else {
+      setLinkResult({ type: "success", message: "Requirements imported successfully." });
+    }
   }
 
   const autoLinkBusy = isAiLoading("requirements:auto-link");
@@ -189,11 +203,22 @@ export function RequirementsTab({
           </Button>
         )}
       </div>
-      {linkResult && (
-        <div className={`mb-4 rounded-[var(--control-radius)] border px-3 py-2 text-sm ${linkResult.startsWith("Auto-link failed") ? "border-red-500/30 bg-red-500/10 text-red-500" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"}`}>
-          {linkResult}
+      {linkResult ? (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className={`mb-4 rounded-[var(--control-radius)] border px-3 py-2 text-sm ${
+            linkResult.type === "error"
+              ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-text)]"
+              : linkResult.type === "info"
+              ? "border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-secondary)]"
+              : "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+          }`}
+        >
+          {linkResult.message}
         </div>
-      )}
+      ) : null}
       <div className="mb-4">
         <textarea
           value={importContent}
