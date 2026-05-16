@@ -906,6 +906,19 @@ function RecentHistoryTable({
 }
 
 function JobDetailDrawer({ job, onClose }: { job: JobView; onClose: () => void }) {
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+
+  // Move focus into the drawer on open; restore to trigger on close.
+  useEffect(() => {
+    triggerRef.current = document.activeElement as HTMLElement;
+    drawerRef.current?.focus();
+    return () => {
+      triggerRef.current?.focus();
+      triggerRef.current = null;
+    };
+  }, []);
+
   // Close on Escape for keyboard accessibility.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -916,7 +929,12 @@ function JobDetailDrawer({ job, onClose }: { job: JobView; onClose: () => void }
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" aria-modal="true" role="dialog">
+    <div
+      className="fixed inset-0 z-50 flex justify-end"
+      aria-modal="true"
+      aria-labelledby="job-detail-drawer-title"
+      role="dialog"
+    >
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/40"
@@ -924,13 +942,17 @@ function JobDetailDrawer({ job, onClose }: { job: JobView; onClose: () => void }
         aria-hidden="true"
       />
       {/* Drawer */}
-      <div className="relative z-10 flex h-full w-full max-w-md flex-col gap-4 overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-base)] p-6 shadow-xl">
+      <div
+        ref={drawerRef}
+        tabIndex={-1}
+        className="relative z-10 flex h-full w-full max-w-md flex-col gap-4 overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-base)] p-6 shadow-xl focus:outline-none"
+      >
         <header className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <p className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
               {job.subsystem}
             </p>
-            <h3 className="text-lg font-semibold text-[var(--text-primary)]">{job.job_type}</h3>
+            <h3 id="job-detail-drawer-title" className="text-lg font-semibold text-[var(--text-primary)]">{job.job_type}</h3>
           </div>
           <Button variant="secondary" onClick={onClose}>
             Close

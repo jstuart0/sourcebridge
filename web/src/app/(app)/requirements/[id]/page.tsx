@@ -21,6 +21,7 @@ import { RemoveRequirementDialog } from "@/components/requirements/RemoveRequire
 import { SourceRefLink } from "@/components/source/SourceRefLink";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
@@ -467,21 +468,27 @@ export default function RequirementDetailPage() {
 
           {/* Tab switcher */}
           <div className="flex items-center gap-6 border-b border-[var(--border-default)]">
-            {(["links", "cliff-notes", "chat"] as RequirementTab[]).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => handleTabSwitch(tab)}
-                className={cn(
-                  "border-b-2 pb-2 pt-1 text-sm font-medium transition-colors",
-                  activeTab === tab
-                    ? "border-[var(--accent-primary)] text-[var(--text-primary)]"
-                    : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
-                )}
-              >
-                {tab === "links" ? `Links (${allLinks.length}${loadingMore ? "+" : ""})` : tab === "cliff-notes" ? "Cliff Notes" : "Chat"}
-              </button>
-            ))}
+            <div role="tablist" aria-label="View" className="flex items-center gap-6">
+              {(["links", "cliff-notes", "chat"] as RequirementTab[]).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  id={`req-tab-${tab}`}
+                  aria-selected={activeTab === tab}
+                  aria-controls={`req-panel-${tab}`}
+                  onClick={() => handleTabSwitch(tab)}
+                  className={cn(
+                    "border-b-2 pb-2 pt-1 text-sm font-medium transition-colors",
+                    activeTab === tab
+                      ? "border-[var(--accent-primary)] text-[var(--text-primary)]"
+                      : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                  )}
+                >
+                  {tab === "links" ? `Links (${allLinks.length}${loadingMore ? "+" : ""})` : tab === "cliff-notes" ? "Cliff Notes" : "Chat"}
+                </button>
+              ))}
+            </div>
             <span className="ml-auto inline-flex rounded-full bg-[var(--bg-hover)] px-2.5 py-1 text-xs font-medium text-[var(--text-tertiary)]">
               Indexed repository view
             </span>
@@ -489,7 +496,7 @@ export default function RequirementDetailPage() {
 
           {/* Links tab */}
           {activeTab === "links" ? (
-            <Panel variant="elevated" className="space-y-5">
+            <Panel variant="elevated" id="req-panel-links" role="tabpanel" aria-labelledby="req-tab-links" tabIndex={0} className="space-y-5">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div className="space-y-1">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
@@ -506,12 +513,12 @@ export default function RequirementDetailPage() {
 
               {showLinkForm ? (
                 <div className="space-y-4 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] p-4">
-                  <input
+                  <Input
                     type="text"
                     value={symbolSearch}
                     onChange={(e) => setSymbolSearch(e.target.value)}
                     placeholder="Search symbols…"
-                    className="h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 text-sm text-[var(--text-primary)]"
+                    aria-label="Search symbols"
                   />
                   <div className="max-h-56 overflow-y-auto rounded-[var(--control-radius)] border border-[var(--border-default)]">
                     {symbols.map((sym: { id: string; name: string; kind: string; filePath: string }) => (
@@ -531,12 +538,12 @@ export default function RequirementDetailPage() {
                       </button>
                     ))}
                   </div>
-                  <input
+                  <Input
                     type="text"
                     value={linkRationale}
                     onChange={(e) => setLinkRationale(e.target.value)}
                     placeholder="Rationale (optional)"
-                    className="h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 text-sm text-[var(--text-primary)]"
+                    aria-label="Link rationale (optional)"
                   />
                   <Button disabled={!selectedSymbol} onClick={handleCreateLink}>
                     Create Link
@@ -603,7 +610,7 @@ export default function RequirementDetailPage() {
 
           {/* Cliff Notes tab */}
           {activeTab === "cliff-notes" ? (
-            <Panel variant="elevated" className="space-y-5">
+            <Panel variant="elevated" id="req-panel-cliff-notes" role="tabpanel" aria-labelledby="req-tab-cliff-notes" tabIndex={0} className="space-y-5">
               {!hasLinks ? (
                 <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-5">
                   <p className="text-sm font-medium text-[var(--text-primary)]">No linked code yet</p>
@@ -718,7 +725,7 @@ export default function RequirementDetailPage() {
 
           {/* Chat tab */}
           {activeTab === "chat" ? (
-            <Panel variant="elevated" className="space-y-5">
+            <Panel variant="elevated" id="req-panel-chat" role="tabpanel" aria-labelledby="req-tab-chat" tabIndex={0} className="space-y-5">
               {!hasLinks ? (
                 <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-5">
                   <p className="text-sm font-medium text-[var(--text-primary)]">No linked code yet</p>
@@ -759,13 +766,14 @@ export default function RequirementDetailPage() {
                     <p className="text-sm text-red-500">{chatError}</p>
                   ) : null}
                   <div className="flex gap-2">
-                    <input
+                    <Input
                       type="text"
                       value={chatQuestion}
                       onChange={(e) => setChatQuestion(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleChatSubmit(); } }}
                       placeholder="Ask about this requirement's implementation…"
-                      className="h-11 flex-1 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 text-sm text-[var(--text-primary)]"
+                      aria-label="Ask about this requirement's implementation"
+                      className="flex-1"
                       disabled={chatLoading}
                     />
                     <Button onClick={handleChatSubmit} disabled={chatLoading || !chatQuestion.trim()}>
