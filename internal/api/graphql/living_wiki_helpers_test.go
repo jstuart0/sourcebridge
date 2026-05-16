@@ -248,6 +248,130 @@ func TestPersistSettingsAndNotice_NilOrchestratorNotice(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// persistLivingWikiSettings — optimistic-concurrency retry paths (T-H2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// conflictOnceStore wraps a RepoSettingsMemStore and injects a single
+// ErrLWikiSettingsVersionConflict on the first SetRepoSettingsIfVersion call.
+// After that, it delegates to the real MemStore so the retry succeeds.
+type conflictOnceStore struct {
+	*livingwiki.RepoSettingsMemStore
+	calls int
+}
+
+func (s *conflictOnceStore) SetRepoSettingsIfVersion(ctx context.Context, settings livingwiki.RepositoryLivingWikiSettings, expectedVersion int) error {
+	s.calls++
+	if s.calls == 1 {
+		return livingwiki.ErrLWikiSettingsVersionConflict
+	}
+	return s.RepoSettingsMemStore.SetRepoSettingsIfVersion(ctx, settings, expectedVersion)
+}
+
+// alwaysConflictStore returns ErrLWikiSettingsVersionConflict on every
+// SetRepoSettingsIfVersion call, simulating persistent concurrent writers.
+type alwaysConflictStore struct {
+	*livingwiki.RepoSettingsMemStore
+}
+
+func (s *alwaysConflictStore) SetRepoSettingsIfVersion(_ context.Context, _ livingwiki.RepositoryLivingWikiSettings, _ int) error {
+	return livingwiki.ErrLWikiSettingsVersionConflict
+}
+
+// TestPersistLivingWikiSettings_ConflictRetrySucceeds verifies the CA-158
+// first-conflict → re-read → re-merge → retry path: when the store returns
+// ErrLWikiSettingsVersionConflict on the first write attempt, persistLivingWikiSettings
+// re-reads the fresh row, merges intent fields, and retries. The second attempt
+// succeeds and the function returns nil.
+func TestPersistLivingWikiSettings_ConflictRetrySucceeds(t *testing.T) {
+	t.Parallel()
+
+	// Seed a row so the re-read on conflict finds something to merge onto.
+	inner := livingwiki.NewRepoSettingsMemStore()
+	seed := livingwiki.RepositoryLivingWikiSettings{
+		TenantID: "default",
+		RepoID:   "repo-retry-1",
+		Enabled:  false,
+		Mode:     livingwiki.RepoWikiModePRReview,
+		Sinks:    []livingwiki.RepoWikiSink{{Kind: livingwiki.RepoWikiSinkGitRepo}},
+	}
+	if err := inner.SetRepoSettings(context.Background(), seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	seeded, _ := inner.GetRepoSettings(context.Background(), "default", "repo-retry-1")
+	if seeded == nil {
+		t.Fatal("seed read returned nil")
+	}
+
+	store := &conflictOnceStore{RepoSettingsMemStore: inner}
+
+	// Attempt to enable the repo.  The first write will conflict; the retry
+	// should succeed after re-reading the fresh row and merging.
+	settings := *seeded
+	settings.Enabled = true
+
+	if err := persistLivingWikiSettings(context.Background(), store, settings); err != nil {
+		t.Fatalf("expected success after retry, got: %v", err)
+	}
+	if store.calls != 2 {
+		t.Errorf("expected exactly 2 SetRepoSettingsIfVersion calls (initial + retry), got %d", store.calls)
+	}
+
+	// Verify the row was actually updated.
+	got, err := inner.GetRepoSettings(context.Background(), "default", "repo-retry-1")
+	if err != nil {
+		t.Fatalf("post-persist read: %v", err)
+	}
+	if got == nil {
+		t.Fatal("row not found after persist")
+	}
+	if !got.Enabled {
+		t.Error("expected Enabled=true after successful retry persist")
+	}
+}
+
+// TestPersistLivingWikiSettings_BothConflicts_ReturnsError verifies the second
+// conflict → surface-error path: when both write attempts return
+// ErrLWikiSettingsVersionConflict, persistLivingWikiSettings returns an error
+// wrapping the sentinel rather than looping indefinitely.
+func TestPersistLivingWikiSettings_BothConflicts_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	// Seed a row so the re-read succeeds (otherwise we'd hit the "row deleted"
+	// fallback branch instead of the retry branch).
+	inner := livingwiki.NewRepoSettingsMemStore()
+	seed := livingwiki.RepositoryLivingWikiSettings{
+		TenantID: "default",
+		RepoID:   "repo-retry-2",
+		Enabled:  false,
+		Mode:     livingwiki.RepoWikiModePRReview,
+		Sinks:    []livingwiki.RepoWikiSink{{Kind: livingwiki.RepoWikiSinkGitRepo}},
+	}
+	if err := inner.SetRepoSettings(context.Background(), seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	seeded, _ := inner.GetRepoSettings(context.Background(), "default", "repo-retry-2")
+	if seeded == nil {
+		t.Fatal("seed read returned nil")
+	}
+
+	store := &alwaysConflictStore{RepoSettingsMemStore: inner}
+
+	settings := *seeded
+	settings.Enabled = true
+
+	err := persistLivingWikiSettings(context.Background(), store, settings)
+	if err == nil {
+		t.Fatal("expected error when both write attempts conflict, got nil")
+	}
+	// The error must wrap or include something meaningful — it should NOT be
+	// ErrLWikiSettingsVersionConflict unwrapped directly (the function wraps it
+	// with context). Verify the message contains the retry context phrase.
+	if !strings.Contains(err.Error(), "after conflict retry") {
+		t.Errorf("error %q should mention 'after conflict retry'", err.Error())
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // enqueueWikiJob — nil-orchestrator path (no real side effects)
 // ─────────────────────────────────────────────────────────────────────────────
 
