@@ -1907,3 +1907,48 @@ prompt to confirm the posture matches the deployment shape. When
   `validate_llm_base_url` with `allow_private=config.llm_allow_private_base_url`.
   Under default config (`allow_private_base_url = true`), both the Go-side and
   Python-side validators accept private-IP base URLs.
+
+### DNS rebind guard — runtime coverage (CA-463, CA-467, 2026-05-16)
+
+The save-time SSRF guard described above validates the `base_url` when an admin saves a
+profile, but does not cover request-time DNS rebinding (where an attacker's domain
+resolves publicly at save time then flips to `169.254.169.254` before the next LLM
+call). The Python worker addresses this with `RebindGuardedTransport` — an httpx
+transport that re-runs `is_private_or_internal_ip` and `is_cloud_metadata_ip` on every
+resolved address at the HTTP transport layer.
+
+As of the 2026-05-16 campaign, the rebind guard covers the full LLM transport surface:
+
+- `AsyncOpenAI`-backed paths (OpenAI, Anthropic-via-compat, OpenRouter, Gemini): via
+  `self._rebind_transport` wired into the SDK's `httpx.AsyncClient` at provider
+  construction.
+- **Ollama-native paths** (`_complete_ollama_native`, `_stream_ollama_native`): via
+  per-call `RebindGuardedTransport` instantiation inside the `async with
+  httpx.AsyncClient(...)` block.
+- **Concurrency probe** (`OpenAICompatProbeBackend.call`): per-call instantiation.
+- **Embedding providers** (`workers/common/embedding/ollama.py`,
+  `workers/common/embedding/openai_compat.py`): per-call instantiation (no long-lived
+  `_client` on these providers).
+
+**Tier structure of the rebind guard:**
+
+- **Tier 1 — always active** (regardless of `allow_private_base_url`): blocks
+  cloud-metadata addresses including AWS IMDSv2 IPv6 (`fd00:ec2::/32`,
+  `_IMDS_V6_NETWORKS`), IPv4-mapped IPv6 form of `169.254.169.254`
+  (`::ffff:a9fe:a9fe`), and `is_cloud_metadata_ip` network set.
+- **Tier 2 — active only when `allow_private_base_url = false`**: blocks RFC1918
+  private networks, loopback, link-local (169.254.0.0/16), CGNAT (100.64.0.0/10),
+  ULA (fc00::/7), unspecified (0.0.0.0, ::), and multicast.
+
+Under the default (`allow_private_base_url = true`), local-LLM operators (Ollama at
+`http://localhost:11434`) are unaffected. The Tier 1 cloud-metadata block is always
+active — `http://169.254.169.254/` is rejected at request time on every call regardless
+of the flag.
+
+**Executor note**: `socket.getaddrinfo` inside `rebind_guard.py:handle_async_request` is
+offloaded via `loop.run_in_executor(None, ...)` to avoid blocking the asyncio event
+loop. The default `ThreadPoolExecutor` is bounded at `cpu_count + 4` threads (max 32).
+Operators on deployments with slow external DNS (e.g., DNS-over-TLS with high latency)
+and LLM concurrency caps near that bound may observe event-loop responsiveness
+degradation under heavy load. Mitigation: lower `SOURCEBRIDGE_LLM_MAX_CONCURRENT_CALLS`
+below the executor bound.

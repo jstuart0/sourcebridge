@@ -106,6 +106,147 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ## [Unreleased]
 
+### 2026-05-16 audit remediation campaign (CA-463..CA-489 subset)
+
+12 commits (`87724f18..d49eed59`). 27 of 30 audit findings closed. Three architectural
+findings deferred per audit author consensus (CA-488, CA-490, CA-491); one cosmetic
+rename deferred (CA-492).
+
+#### BREAKING
+
+- **CA-472: Helm `appVersion` auto-wired to image tags.** `Chart.yaml` `appVersion`
+  is now `0.14.0`; `values.yaml` `api.image.tag`, `worker.image.tag`, and
+  `web.image.tag` default to `""`, which Helm templates resolve to `.Chart.AppVersion`.
+  **Operators with an explicit `image.tag` override continue to use that value** — no
+  change. Operators who relied on the previous hard-coded `0.2.0` default will now pull
+  `0.14.0`-tagged images on `helm upgrade`. `oss-release.yml` CI now auto-bumps
+  `Chart.yaml` on tagged releases (SemVer guard).
+
+#### Operator action required
+
+- **Hub-compose worker container recreate required after upgrade.** `docker-compose.hub.yml`
+  worker healthcheck was updated to invoke `sourcebridge-health-probe.sh` (the script
+  baked into the worker image by `deploy/docker/Dockerfile.worker`). The script now reads
+  `SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET` and adds the `-rpc-header` flag when set.
+  Because healthcheck config is not updated on a plain `docker compose up -d`, you must
+  recreate the container after pulling the new image:
+  ```
+  docker compose -f docker-compose.hub.yml up -d --force-recreate worker
+  ```
+  Installs without a custom gRPC secret are unaffected in behavior but must still recreate
+  to pick up the updated healthcheck script.
+
+#### Security
+
+- **CA-463 / D-H1**: DNS rebind guard extended to Ollama-native LLM paths
+  (`_complete_ollama_native`, `_stream_ollama_native`). Both now instantiate
+  `RebindGuardedTransport` per call instead of inheriting the bare `httpx.AsyncClient`.
+- **CA-467 / X-H1**: DNS rebind guard extended to both embedding providers
+  (`workers/common/embedding/ollama.py`, `workers/common/embedding/openai_compat.py`).
+  Per-call `RebindGuardedTransport` instantiation.
+- **CA-468 / X-M1**: DNS rebind guard extended to the concurrency probe
+  (`OpenAICompatProbeBackend.call`). Per-call instantiation. `allow_private` parameter
+  plumbed from `config.llm_allow_private_base_url`.
+- **CA-466 / D-L2**: `_CLOUD_METADATA_NETS` constant removed from `rebind_guard.py`
+  (superseded by the IPv4-mapped IPv6 unwrap + `_IMDS_V6_NETWORKS` in `ip_check.py`).
+- **CA-464 / D-M1**: `workers/common/llm/ip_check.py` created as the canonical
+  IP-classification module. `config.py` and `rebind_guard.py` both import from it; the
+  circular-import documentation comment is deleted. `is_private_or_internal_ip`,
+  `is_cloud_metadata_ip`, `CGNAT_NETWORK` are public module exports.
+- **CA-489 / A-H2**: `TenantFilteredStore` now gates 15 additional ID-keyed and
+  collection-retrieval methods via `hasAccess()`. Previous gating covered 8 federation
+  methods (CA-203); total is now 24 (8 + 15 ID-keyed + 1 cross-repo refs). Closes
+  cross-tenant content disclosure reachable via `discussCode` and related
+  discussion-context flows on multi-tenant deployments. `TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated`
+  enumerates the gated (24) and intentionally-ungated (6) method sets.
+
+#### Infrastructure / deployment
+
+- **CA-470 / O-H1**: `sourcebridge-health-probe.sh` in `deploy/docker/Dockerfile.worker`
+  updated to read `SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET` and conditionally pass
+  `-rpc-header=x-sb-worker-secret:${SECRET}` to `grpc_health_probe`. Previously every
+  kustomize/Helm worker deployment with a non-default gRPC secret ran
+  permanently-unhealthy. Requires worker image rebuild on upgrade (see operator action
+  above).
+- **CA-471 / O-M1**: `docker-compose.hub.yml` worker healthcheck changed from bare
+  `grpc_health_probe` command to `CMD-SHELL` invoking `sourcebridge-health-probe.sh`
+  (picks up auth secret injection).
+- **CA-472 / O-M2**: Helm `Chart.yaml` `appVersion` set to `0.14.0`; image tag defaults
+  wired to `.Chart.AppVersion` (see BREAKING above). `oss-release.yml` CI auto-bumps
+  `Chart.yaml` on tagged releases.
+- **CA-473 / O-L1**: Redis kustomize manifest gains `imagePullPolicy: IfNotPresent`.
+  AND-combinator parity applied to all egress peers in the hardened-overlay `allow-set.yaml`:
+  every `from:` / `to:` entry uses a single list item combining `podSelector` +
+  `namespaceSelector`.
+
+#### Tests
+
+- **CA-479 / T-H1**: `TestEnrichAllRequirements_BatchSizeClampsAt100` rewritten with a
+  concrete `orchestrator.New(...)` + counting fake `LLMCaller`. Verifies runtime batch
+  pagination, not just config-read. Note: counting fake observes LLM call count; runtime
+  batch boundary not verified via code-path tracing (see Known gaps).
+- **CA-480 / T-H2**: `TestEnrichRequirement_MutationFields` — field-level assertions on
+  enriched requirement output. Uses real orchestrator fixture.
+- **CA-481 / T-H3**: `TestEnrichRequirement_ForceFlag` — verifies `force: true` triggers
+  re-enrichment even when an artifact exists.
+- **CA-482 / T-M1**: `TestEnrichAllRequirements_Orchestrator` — end-to-end orchestrator
+  dispatch with seeded requirements.
+- **CA-483 / T-M2**: `ConcurrencyRegistry.close()` test now uses `await registry.close()`
+  (`async def close()`).
+- **CA-484 / T-M3**: `internal/api/graphql` package gains `TestMain` that calls
+  `usage.ResetCountersForTest()` before `m.Run()`.
+- **CA-485 / T-M4**: `ENRICH_REQUIREMENT_MUTATION` in `web/src/lib/graphql/queries.ts`
+  updated to accept `$force: Boolean`.
+- **CA-486 / T-L1**: `test_ip_check.py` added covering `is_private_or_internal_ip`,
+  `is_cloud_metadata_ip`, IPv4-mapped IPv6 unwrap, and `_IMDS_V6_NETWORKS`.
+- **CA-487 / T-L2**: Makefile CSP soak deadline comment updated.
+
+#### UX / accessibility
+
+- **CA-474 / U-H1**: Requirements-tab banner state typed as
+  `{ type: "success" | "error" | "info"; message: string } | null` with
+  `role="status" aria-live="polite" aria-atomic="true"`. Error branch uses
+  `--danger-*` design tokens. `handleImportReqs` now sets a typed banner object
+  (previously had zero banner coverage). "Nothing to do" path renders as `info`
+  instead of misleadingly green.
+- **CA-475 / U-M1**: In-flight requirements-tab text uses
+  `text-[var(--text-secondary)]` + `animate-pulse`.
+- **CA-476 / U-M2**: Artifact-detail tables and admin monitor tables: `<th>` elements
+  gain `scope="col"`.
+- **CA-477 / U-L1**: Chat message renders token count from
+  `usage.inputTokens + usage.outputTokens`.
+- **CA-478 / U-L2**: `<summary>` focus ring verified present via global `:focus-visible`
+  rule at `web/src/styles/recipes.css:25-28`. No per-element override needed.
+
+#### Code health
+
+- **CA-465 / D-L1**: `localAuthUsername = "admin@localhost"` promoted from inline
+  string literal to package-level constant in `internal/api/rest/login_rate_limit.go`.
+- **CA-469 / X-L1**: Dead unreachable `secondsString` branch removed from
+  `login_rate_limit.go`.
+
+#### Known gaps
+
+- **CA-488 / A-H1** — Knowledge generation domain logic inside `internal/api/graphql/`
+  deferred to a dedicated multi-week initiative (moving `runKnowledgePipeline` + 5
+  per-artifact pipelines into `internal/knowledge/generation/`). Audit author (bob)
+  flagged as a multi-week refactor. Tracked as a separate initiative.
+- **CA-490 / A-M1** — `GraphStore` 50-method mega-interface narrowing deferred to a
+  gradual cleanup sprint (audit author: "does not require a flag day").
+- **CA-491 / A-M2** — `SurrealStore` multi-interface decomposition deferred; dependent
+  on A-H1 landing first.
+- **CA-492 / A-L1** — `livingwiki/orchestrator.Orchestrator` type rename deferred:
+  18+ importers identified by dexter's pre-run grep, exceeding the rename gate; bob
+  flagged proto/JSON serialization risk.
+- **T-H3 batchSize clamp runtime observation**: `TestEnrichAllRequirements_BatchSizeClampsAt100`
+  verifies LLM call count via a counting fake but does not trace runtime batch boundaries
+  directly. Follow-up: wire a counting LLMCaller fake to pin actual runtime batch
+  boundaries (D-024b downgrade).
+- **`--bg-subtle` token**: used in the info-branch banner but is an undefined design
+  token (falls through to transparent). Track as token-hygiene follow-up.
+- **`admin/comprehension/*.tsx` bare `outline-none`**: 8 usages relying on
+  border-color-only focus indication — pre-existing WCAG 2.4.11 gap; tracked separately.
+
 ### BREAKING
 
 - **CA-345: Kustomize DATABASE rename — `"main"` → `"sourcebridge"`**. Both
