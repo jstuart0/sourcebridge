@@ -4,6 +4,18 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.14.0-rc.3...v0.15.0-rc.3) (2026-05-16)
+
+
+### Added
+
+* enrich cluster — helper extraction, admin gate, tests, web UI (D-H1, X-H1, T-H1, T-H4, U-H1) ([5be8393](https://github.com/sourcebridge-ai/sourcebridge/commit/5be8393a057563b316f38ed0add5b38e6da176ac))
+
+
+### Fixed
+
+* **ci:** ruff SIM117 + F401 in test_rebind_guard.py ([79b30c9](https://github.com/sourcebridge-ai/sourcebridge/commit/79b30c953ac16067088847f7ac9f600928488685))
+
 ## [0.14.0-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.13.1-rc.3...v0.14.0-rc.3) (2026-05-15)
 
 
