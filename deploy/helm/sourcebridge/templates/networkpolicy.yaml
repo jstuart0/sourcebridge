@@ -79,11 +79,19 @@ spec:
         - protocol: TCP
           port: 8080
     # From web pods (Next.js middleware proxy via SOURCEBRIDGE_WEB_DEV_PROXY)
+    # O-H1: namespaceSelector AND podSelector (single list item, AND combinator) so
+    # only web pods in the release namespace can reach the API. Without
+    # namespaceSelector the policy is namespace-wide: any namespace whose pods carry
+    # the web label would be admitted. Matches the CA-346/347/355 pattern used on
+    # the other peers in this file.
     - from:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
               app.kubernetes.io/component: web
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
       ports:
         - protocol: TCP
           port: 8080
