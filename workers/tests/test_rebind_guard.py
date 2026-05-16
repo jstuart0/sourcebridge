@@ -39,7 +39,7 @@ async def test_cloud_metadata_ip_always_blocked_allow_private_false():
     """169.254.169.254 (AWS IMDS) is blocked even when allow_private=False."""
     transport = RebindGuardedTransport(allow_private=False)
     with (
-        patch("socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")),
+        patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")),
         pytest.raises(httpx.ConnectError, match="dns-rebind-guard"),
     ):
         await transport.handle_async_request(_make_request("attacker.example.com"))
@@ -54,7 +54,7 @@ async def test_cloud_metadata_ip_always_blocked_allow_private_true():
     """
     transport = RebindGuardedTransport(allow_private=True)
     with (
-        patch("socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")),
+        patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")),
         pytest.raises(httpx.ConnectError, match="dns-rebind-guard"),
     ):
         await transport.handle_async_request(_make_request("attacker.example.com"))
@@ -66,7 +66,7 @@ async def test_ipv6_link_local_always_blocked():
     transport = RebindGuardedTransport(allow_private=True)
     ipv6_addrinfo = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("fe80::1", 443, 0, 0))]
     with (
-        patch("socket.getaddrinfo", return_value=ipv6_addrinfo),
+        patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=ipv6_addrinfo),
         pytest.raises(httpx.ConnectError, match="dns-rebind-guard"),
     ):
         await transport.handle_async_request(_make_request("attacker.example.com"))
@@ -77,7 +77,7 @@ async def test_private_ip_blocked_when_allow_private_false():
     """192.168.1.1 is blocked when allow_private=False."""
     transport = RebindGuardedTransport(allow_private=False)
     with (
-        patch("socket.getaddrinfo", return_value=_addrinfo("192.168.1.1")),
+        patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=_addrinfo("192.168.1.1")),
         pytest.raises(httpx.ConnectError, match="dns-rebind-guard"),
     ):
         await transport.handle_async_request(_make_request("internal.example.com"))
@@ -96,7 +96,7 @@ async def test_private_ip_allowed_when_allow_private_true(monkeypatch):
     super_mock = AsyncMock(return_value=fake_response)
 
     with (
-        patch("socket.getaddrinfo", return_value=_addrinfo("192.168.1.1")),
+        patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=_addrinfo("192.168.1.1")),
         patch.object(
             httpx.AsyncHTTPTransport,
             "handle_async_request",
@@ -118,7 +118,7 @@ async def test_public_ip_allowed_allow_private_false(monkeypatch):
     super_mock = AsyncMock(return_value=fake_response)
 
     with (
-        patch("socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")),
+        patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")),
         patch.object(
             httpx.AsyncHTTPTransport,
             "handle_async_request",
@@ -140,7 +140,7 @@ async def test_gaierror_propagates_to_super(monkeypatch):
     super_mock = AsyncMock(return_value=fake_response)
 
     with (
-        patch("socket.getaddrinfo", side_effect=socket.gaierror("no such host")),
+        patch("workers.common.llm.rebind_guard.socket.getaddrinfo", side_effect=socket.gaierror("no such host")),
         patch.object(
             httpx.AsyncHTTPTransport,
             "handle_async_request",
@@ -167,7 +167,7 @@ async def test_ip_literal_cloud_metadata_blocked():
     assert req.url.host == "169.254.169.254"
 
     with (
-        patch("socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")),
+        patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")),
         pytest.raises(httpx.ConnectError, match="dns-rebind-guard"),
     ):
         await transport.handle_async_request(req)
@@ -178,7 +178,7 @@ async def test_loopback_blocked_allow_private_false():
     """127.0.0.1 is blocked when allow_private=False."""
     transport = RebindGuardedTransport(allow_private=False)
     with (
-        patch("socket.getaddrinfo", return_value=_addrinfo("127.0.0.1")),
+        patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=_addrinfo("127.0.0.1")),
         pytest.raises(httpx.ConnectError, match="dns-rebind-guard"),
     ):
         await transport.handle_async_request(_make_request("localhost"))
@@ -193,7 +193,7 @@ async def test_loopback_allowed_allow_private_true(monkeypatch):
     super_mock = AsyncMock(return_value=fake_response)
 
     with (
-        patch("socket.getaddrinfo", return_value=_addrinfo("127.0.0.1")),
+        patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=_addrinfo("127.0.0.1")),
         patch.object(
             httpx.AsyncHTTPTransport,
             "handle_async_request",
@@ -402,3 +402,105 @@ async def test_anthropic_provider_wires_rebind_guard():
     http_client = provider.client._client  # anthropic AsyncAnthropic._client → httpx.AsyncClient
     assert isinstance(http_client._transport, RebindGuardedTransport)
     assert http_client._transport._allow_private is False
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_provider_stream_ollama_native_uses_rebind_guard():
+    """_stream_ollama_native uses a per-call RebindGuardedTransport (Finding 3).
+
+    Parallel to test_openai_compat_provider_ollama_native_uses_rebind_guard
+    which covers _complete_ollama_native.  Both the complete and stream Ollama
+    native paths must construct a RebindGuardedTransport per-call.
+    """
+    from workers.common.llm.openai_compat import OpenAICompatProvider
+
+    provider = OpenAICompatProvider(
+        api_key="",
+        model="qwen3:8b",
+        base_url="http://localhost:11434/v1",
+        provider_name="ollama",
+        disable_thinking=True,
+        allow_private_base_url=True,
+    )
+
+    transport_inits: list[bool] = []
+    original_init = RebindGuardedTransport.__init__
+
+    def capture_init(self_inner, allow_private: bool, **kwargs: object) -> None:
+        original_init(self_inner, allow_private=allow_private, **kwargs)
+        transport_inits.append(allow_private)
+
+    # One NDJSON chunk + final done=true chunk to satisfy the stream loop.
+    chunk1 = b'{"message": {"content": "hi"}, "done": false}\n'
+    chunk2 = b'{"message": {"content": ""}, "done": true}\n'
+
+    async def fake_aiter_lines():
+        for line in (chunk1.strip().decode(), chunk2.strip().decode()):
+            yield line
+
+    fake_stream_response = MagicMock()
+    fake_stream_response.raise_for_status = MagicMock()
+    fake_stream_response.aiter_lines = fake_aiter_lines
+    fake_stream_response.__aenter__ = AsyncMock(return_value=fake_stream_response)
+    fake_stream_response.__aexit__ = AsyncMock(return_value=False)
+
+    fake_client = MagicMock()
+    fake_client.stream = MagicMock(return_value=fake_stream_response)
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch.object(RebindGuardedTransport, "__init__", capture_init),
+        patch("workers.common.llm.openai_compat.httpx.AsyncClient", return_value=fake_client),
+    ):
+        chunks = []
+        async for chunk in provider._stream_ollama_native(
+            prompt="hello",
+            system="",
+            max_tokens=16,
+            temperature=0.0,
+            use_model="qwen3:8b",
+        ):
+            chunks.append(chunk)
+
+    assert len(transport_inits) >= 1, "RebindGuardedTransport was not instantiated during stream"
+    assert all(v is True for v in transport_inits)
+    assert chunks == ["hi"]
+
+
+# ---------------------------------------------------------------------------
+# IPv4-mapped and AWS IMDSv2 IPv6 — integration tests at request time
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ipv4_mapped_imds_blocked_at_request_time():
+    """::ffff:169.254.169.254 (IPv4-mapped IMDS) is blocked by the transport guard.
+
+    socket.getaddrinfo on dual-stack hosts can return IPv4-mapped results.
+    An attacker controlling DNS can deliberately return this form to bypass
+    guards that only classify IPv6Address with is_link_local.
+    """
+    transport = RebindGuardedTransport(allow_private=True)
+    ipv6_addrinfo = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::ffff:169.254.169.254", 443, 0, 0))]
+    with (
+        patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=ipv6_addrinfo),
+        pytest.raises(httpx.ConnectError, match="dns-rebind-guard"),
+    ):
+        await transport.handle_async_request(_make_request("attacker.example.com"))
+
+
+@pytest.mark.asyncio
+async def test_imdsv2_ipv6_blocked_at_request_time():
+    """fd00:ec2::254 (AWS IMDSv2 IPv6) is blocked by the transport guard.
+
+    With allow_private=True, tier 2 is skipped — the IMDSv2 IPv6 address must
+    be caught by tier 1 (is_cloud_metadata_ip) via the fd00:ec2::/32 check.
+    """
+    transport = RebindGuardedTransport(allow_private=True)
+    ipv6_addrinfo = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("fd00:ec2::254", 443, 0, 0))]
+    with (
+        patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=ipv6_addrinfo),
+        pytest.raises(httpx.ConnectError, match="dns-rebind-guard"),
+    ):
+        await transport.handle_async_request(_make_request("attacker.example.com"))

@@ -150,3 +150,50 @@ class TestCgnatNetwork:
         import ipaddress
 
         assert ipaddress.IPv4Network("100.64.0.0/10") == CGNAT_NETWORK
+
+
+# ---------------------------------------------------------------------------
+# IPv4-mapped IPv6 and AWS IMDSv2 IPv6 (xander MEDIUM findings)
+# ---------------------------------------------------------------------------
+
+
+class TestIpv4MappedAndImdsV6:
+    """IPv4-mapped IPv6 addresses and AWS IMDSv2 IPv6 are correctly classified.
+
+    xander MEDIUM findings surfaced during Phase 1 mid-build review:
+    - ::ffff:169.254.169.254 bypassed both classifiers (IPv6Address has
+      is_link_local=False for the mapped form).
+    - fd00:ec2::254 (AWS IMDSv2 IPv6, ULA) was not in is_cloud_metadata_ip.
+    """
+
+    def test_ipv4_mapped_imds_blocked_by_cloud_metadata(self):
+        """::ffff:169.254.169.254 (IPv4-mapped IMDS) is blocked by is_cloud_metadata_ip."""
+        assert is_cloud_metadata_ip("::ffff:169.254.169.254") is True
+
+    def test_ipv4_mapped_imds_blocked_by_private_check(self):
+        """::ffff:169.254.169.254 (IPv4-mapped IMDS) is blocked by is_private_or_internal_ip."""
+        assert is_private_or_internal_ip("::ffff:169.254.169.254") is True
+
+    def test_ipv4_mapped_rfc1918_blocked_by_private_check(self):
+        """::ffff:192.168.1.1 (IPv4-mapped RFC 1918) is blocked by is_private_or_internal_ip."""
+        assert is_private_or_internal_ip("::ffff:192.168.1.1") is True
+
+    def test_imdsv2_ipv6_blocked_by_cloud_metadata(self):
+        """fd00:ec2::254 (AWS IMDSv2 IPv6) is blocked by is_cloud_metadata_ip."""
+        assert is_cloud_metadata_ip("fd00:ec2::254") is True
+
+    def test_imdsv2_ipv6_blocked_by_private_check(self):
+        """fd00:ec2::254 (AWS IMDSv2 IPv6) is blocked by is_private_or_internal_ip (ULA)."""
+        assert is_private_or_internal_ip("fd00:ec2::254") is True
+
+    def test_imdsv2_ipv6_range_blocked_by_cloud_metadata(self):
+        """fd00:ec2:1234::1 (interior of fd00:ec2::/32) is blocked by is_cloud_metadata_ip."""
+        assert is_cloud_metadata_ip("fd00:ec2:1234::1") is True
+
+    def test_ipv4_mapped_public_allowed_by_private_check(self):
+        """::ffff:93.184.216.34 (IPv4-mapped public IP) is not blocked."""
+        assert is_private_or_internal_ip("::ffff:93.184.216.34") is False
+
+    def test_ipv4_mapped_public_not_cloud_metadata(self):
+        """::ffff:93.184.216.34 (IPv4-mapped public IP) is not cloud-metadata."""
+        assert is_cloud_metadata_ip("::ffff:93.184.216.34") is False

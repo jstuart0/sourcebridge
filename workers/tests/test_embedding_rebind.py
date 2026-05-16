@@ -122,7 +122,7 @@ class TestOllamaEmbeddingProviderReBindGuard:
             return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 11434))]
 
         with (
-            patch("socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")),
+            patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")),
             pytest.raises(httpx.ConnectError, match="dns-rebind-guard"),
         ):
             await provider._embed_batch(["test"])
@@ -234,7 +234,7 @@ class TestOpenAICompatEmbeddingProviderRebindGuard:
             return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 8080))]
 
         with (
-            patch("socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")),
+            patch("workers.common.llm.rebind_guard.socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")),
             pytest.raises(httpx.ConnectError, match="dns-rebind-guard"),
         ):
             await provider._embed_batch(["test"])

@@ -20,8 +20,11 @@ Two separate tiers of enforcement:
   - Other private/internal IPs: blocked only when ``allow_private=False``.
 
 ``allow_private=True`` (the default for Ollama/vLLM operators) therefore:
-  - Permits 192.168.x.x, 10.x.x.x, etc. — as intended.
-  - Still blocks 169.254.169.254, ::1 as a loopback leak, and multicast.
+  - Permits 192.168.x.x, 10.x.x.x, loopback (127.0.0.1, ::1), etc. — required
+    for local Ollama (http://localhost:11434) and self-hosted vLLM/llama.cpp.
+  - Still blocks tier-1 cloud-metadata addresses: 169.254.169.254 and the
+    entire 169.254.0.0/16 link-local range, fd00:ec2::/32 (AWS IMDSv2 IPv6),
+    fe80::/10 (IPv6 link-local), and their IPv4-mapped forms (::ffff:<v4>).
 
 Load-bearing constraints:
   - Do NOT add a flag to disable this guard entirely.  The only knob is
