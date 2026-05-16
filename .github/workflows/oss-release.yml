@@ -204,6 +204,12 @@ jobs:
     # The commit is pushed back to the default branch (main). If the commit
     # fails because main has diverged (e.g. another merge landed during the
     # release), re-run this job from the Actions UI after resolving the conflict.
+    #
+    # NOTE: this job pushes directly to main. If branch protection requires PR
+    # reviews, github-actions[bot] must be in the bypass allowlist
+    # (Settings → Branches → Branch protection rules → "Allow specified actors
+    # to bypass required pull requests"). Otherwise the push will fail with
+    # GH006 and the chart will not be bumped.
     needs: release
     runs-on: ubuntu-latest
     permissions:
@@ -219,6 +225,16 @@ jobs:
 
       - name: Install yq
         uses: mikefarah/yq@f15db9371d946456c5e1a1a4a6febbf7e4bc4a90 # v4.45.1
+
+      - name: Validate version is SemVer
+        # Guard against workflow_dispatch from a branch (e.g. main): GITHUB_REF_NAME
+        # would be "main" and yq would patch Chart.yaml to version: main.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! echo "${VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$'; then
+            echo "::error::Version '${VERSION}' is not SemVer; refusing to patch Chart.yaml (dispatch from a branch?)"
+            exit 1
+          fi
 
       - name: Compute version (strip leading v)
         id: version
