@@ -134,11 +134,11 @@ export function InFlightPagesPanel({ jobId }: { jobId: string }) {
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-[var(--border-default)] text-left text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
-                <th className="pb-1 pr-3">Page</th>
-                <th className="pb-1 pr-3">Template</th>
-                <th className="pb-1 pr-3">Attempt</th>
-                <th className="pb-1 pr-3">Started</th>
-                <th className="pb-1">Elapsed</th>
+                <th scope="col" className="pb-1 pr-3">Page</th>
+                <th scope="col" className="pb-1 pr-3">Template</th>
+                <th scope="col" className="pb-1 pr-3">Attempt</th>
+                <th scope="col" className="pb-1 pr-3">Started</th>
+                <th scope="col" className="pb-1">Elapsed</th>
               </tr>
             </thead>
             <tbody>
@@ -170,20 +170,23 @@ export function InFlightPagesPanel({ jobId }: { jobId: string }) {
                       })}
                     </td>
                     <td className="py-1.5">
-                      <span className="flex items-center gap-1.5">
-                        <span className={cn(warn ? "text-amber-600 dark:text-amber-400" : "text-[var(--text-secondary)]")}>
+                      <span className="flex items-center gap-1.5" aria-live="polite" aria-atomic="false">
+                        <span className={cn(warn ? "text-amber-700 dark:text-amber-300" : "text-[var(--text-secondary)]")}>
                           {formatElapsedInFlight(page.elapsed_ms)}
                         </span>
                         {warn && (
-                          <span
-                            className="inline-block h-2 w-2 rounded-full bg-amber-400"
-                            title={
-                              data.median_completed_ms_known
-                                ? `Elapsed exceeds 3× median for this run (median: ${formatElapsedInFlight(data.median_completed_ms)})`
-                                : `Elapsed exceeds ${formatElapsedInFlight(WARN_THRESHOLD_FLAT_MS)} (flat threshold)`
-                            }
-                            aria-label="Slow page warning"
-                          />
+                          <>
+                            <span
+                              className="inline-block h-2 w-2 rounded-full bg-amber-400"
+                              title={
+                                data.median_completed_ms_known
+                                  ? `Elapsed exceeds 3× median for this run (median: ${formatElapsedInFlight(data.median_completed_ms)})`
+                                  : `Elapsed exceeds ${formatElapsedInFlight(WARN_THRESHOLD_FLAT_MS)} (flat threshold)`
+                              }
+                              aria-hidden="true"
+                            />
+                            <span className="text-xs text-amber-700 dark:text-amber-300">(slow)</span>
+                          </>
                         )}
                       </span>
                     </td>

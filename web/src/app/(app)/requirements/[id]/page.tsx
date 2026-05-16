@@ -763,7 +763,7 @@ export default function RequirementDetailPage() {
                     ) : null}
                   </div>
                   {chatError ? (
-                    <p className="text-sm text-red-500">{chatError}</p>
+                    <p className="text-sm text-[var(--danger-text)]">{chatError}</p>
                   ) : null}
                   <div className="flex gap-2">
                     <Input
