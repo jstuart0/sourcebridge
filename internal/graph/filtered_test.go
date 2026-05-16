@@ -347,3 +347,266 @@ func TestFilteredOSSPassThroughStoreAPIContract(t *testing.T) {
 		t.Fatalf("OSS pass-through unexpectedly returned access denied: %v", err)
 	}
 }
+
+// =============================================================================
+// A-H2 Phase 2 — ID-keyed pass-through gating canary and regression tests
+// =============================================================================
+
+// TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated is the A-H2 Phase 2 canary.
+//
+// Source of truth: thoughts/shared/plans/active/2026-05-16-deliver-audit-remediation.md
+//   Phase 2 method-coverage table (D-020 + D-021 + D-016b).
+//
+// Intentionally ungated methods (NOT in this canary's coverage):
+//   StoreEmbedding, StoreReviewResult, GetReviewResults, GetEmbedding,
+//   GetFileSymbols, GetLinksForFile. All marked with load-bearing
+//   comments in filtered.go. Re-gate before adding any public consumer.
+//
+// Adding a new ID-keyed Get/Update/Promote/Dismiss method to TenantFilteredStore
+// MUST come with an entry in this canary OR a load-bearing comment justifying exemption.
+func TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated(t *testing.T) {
+	ctx := context.Background()
+
+	// Build a fresh inner MemStore and seed entities in both repos.
+	inner := NewStore()
+	inner.mu.Lock()
+	inner.repos["repo-allowed"] = &Repository{ID: "repo-allowed", Name: "allowed"}
+	inner.repos["repo-denied"] = &Repository{ID: "repo-denied", Name: "denied"}
+	inner.symbols["sym-allowed"] = &StoredSymbol{ID: "sym-allowed", RepoID: "repo-allowed", Name: "AllowedFn", Kind: "function"}
+	inner.symbols["sym-denied"] = &StoredSymbol{ID: "sym-denied", RepoID: "repo-denied", Name: "DeniedFn", Kind: "function"}
+	inner.repoSymbols["repo-allowed"] = []string{"sym-allowed"}
+	inner.repoSymbols["repo-denied"] = []string{"sym-denied"}
+	inner.links["link-allowed"] = &StoredLink{ID: "link-allowed", RepoID: "repo-allowed", SymbolID: "sym-allowed"}
+	inner.links["link-denied"] = &StoredLink{ID: "link-denied", RepoID: "repo-denied", SymbolID: "sym-denied"}
+	inner.symLinks["sym-allowed"] = []string{"link-allowed"}
+	inner.symLinks["sym-denied"] = []string{"link-denied"}
+	inner.requirements["req-allowed"] = &StoredRequirement{ID: "req-allowed", RepoID: "repo-allowed", Title: "r1"}
+	inner.requirements["req-denied"] = &StoredRequirement{ID: "req-denied", RepoID: "repo-denied", Title: "r2"}
+	inner.reqLinks["req-allowed"] = []string{"link-allowed"}
+	inner.reqLinks["req-denied"] = []string{"link-denied"}
+	inner.discoveredRequirements["dreq-allowed"] = &DiscoveredRequirement{ID: "dreq-allowed", RepoID: "repo-allowed", Status: "discovered"}
+	inner.discoveredRequirements["dreq-denied"] = &DiscoveredRequirement{ID: "dreq-denied", RepoID: "repo-denied", Status: "discovered"}
+	// Wire call-graph edges: sym-denied calls sym-allowed (cross-repo edge for filter testing)
+	inner.callGraph["sym-denied"] = []string{"sym-allowed"}
+	inner.reverseCallGraph["sym-allowed"] = []string{"sym-denied"}
+	inner.testedByGraph["sym-allowed"] = []string{"sym-denied"}
+	inner.mu.Unlock()
+
+	// Tenant only has access to repo-allowed.
+	f := NewTenantFilteredStore(inner, []string{"repo-allowed"})
+
+	t.Run("GetSymbol/cross-tenant returns nil", func(t *testing.T) {
+		got := f.GetSymbol(ctx, "sym-denied")
+		if got != nil {
+			t.Fatalf("expected nil, got %+v", got)
+		}
+	})
+
+	t.Run("GetSymbol/allowed returns entity", func(t *testing.T) {
+		got := f.GetSymbol(ctx, "sym-allowed")
+		if got == nil {
+			t.Fatal("expected symbol, got nil")
+		}
+	})
+
+	t.Run("GetSymbolsByIDs/cross-tenant entries removed", func(t *testing.T) {
+		got := f.GetSymbolsByIDs(ctx, []string{"sym-allowed", "sym-denied"})
+		if _, ok := got["sym-denied"]; ok {
+			t.Fatal("cross-tenant sym-denied should not appear in result")
+		}
+		if _, ok := got["sym-allowed"]; !ok {
+			t.Fatal("sym-allowed should appear in result")
+		}
+	})
+
+	t.Run("GetRequirement/cross-tenant returns nil", func(t *testing.T) {
+		got := f.GetRequirement(ctx, "req-denied")
+		if got != nil {
+			t.Fatalf("expected nil, got %+v", got)
+		}
+	})
+
+	t.Run("GetRequirement/allowed returns entity", func(t *testing.T) {
+		got := f.GetRequirement(ctx, "req-allowed")
+		if got == nil {
+			t.Fatal("expected requirement, got nil")
+		}
+	})
+
+	t.Run("GetRequirementsByIDs/cross-tenant entries removed", func(t *testing.T) {
+		got := f.GetRequirementsByIDs(ctx, []string{"req-allowed", "req-denied"})
+		if _, ok := got["req-denied"]; ok {
+			t.Fatal("cross-tenant req-denied should not appear in result")
+		}
+		if _, ok := got["req-allowed"]; !ok {
+			t.Fatal("req-allowed should appear in result")
+		}
+	})
+
+	t.Run("GetLink/cross-tenant returns nil", func(t *testing.T) {
+		got := f.GetLink(ctx, "link-denied")
+		if got != nil {
+			t.Fatalf("expected nil, got %+v", got)
+		}
+	})
+
+	t.Run("GetLink/allowed returns entity", func(t *testing.T) {
+		got := f.GetLink(ctx, "link-allowed")
+		if got == nil {
+			t.Fatal("expected link, got nil")
+		}
+	})
+
+	t.Run("GetLinksForRequirement/cross-tenant req returns nil", func(t *testing.T) {
+		got := f.GetLinksForRequirement(ctx, "req-denied", true)
+		if got != nil {
+			t.Fatalf("expected nil, got %v", got)
+		}
+	})
+
+	t.Run("GetLinksForRequirement/allowed req returns links", func(t *testing.T) {
+		got := f.GetLinksForRequirement(ctx, "req-allowed", true)
+		// link-allowed is in repo-allowed — should be returned
+		if len(got) == 0 {
+			t.Fatal("expected links for req-allowed, got none")
+		}
+	})
+
+	t.Run("GetLinksForSymbol/cross-tenant sym returns nil", func(t *testing.T) {
+		got := f.GetLinksForSymbol(ctx, "sym-denied", true)
+		if got != nil {
+			t.Fatalf("expected nil, got %v", got)
+		}
+	})
+
+	t.Run("GetLinksForSymbol/allowed sym returns links", func(t *testing.T) {
+		got := f.GetLinksForSymbol(ctx, "sym-allowed", true)
+		if len(got) == 0 {
+			t.Fatal("expected links for sym-allowed, got none")
+		}
+	})
+
+	t.Run("UpdateRequirementFields/cross-tenant returns nil without write", func(t *testing.T) {
+		got := f.UpdateRequirementFields(ctx, "req-denied", RequirementUpdate{})
+		if got != nil {
+			t.Fatalf("expected nil, got %+v", got)
+		}
+	})
+
+	t.Run("GetDiscoveredRequirement/cross-tenant returns nil", func(t *testing.T) {
+		got := f.GetDiscoveredRequirement(ctx, "dreq-denied")
+		if got != nil {
+			t.Fatalf("expected nil, got %+v", got)
+		}
+	})
+
+	t.Run("GetDiscoveredRequirement/allowed returns entity", func(t *testing.T) {
+		got := f.GetDiscoveredRequirement(ctx, "dreq-allowed")
+		if got == nil {
+			t.Fatal("expected discovered requirement, got nil")
+		}
+	})
+
+	t.Run("PromoteDiscoveredRequirement/cross-tenant returns nil", func(t *testing.T) {
+		got := f.PromoteDiscoveredRequirement(ctx, "dreq-denied", "req-x")
+		if got != nil {
+			t.Fatalf("expected nil, got %+v", got)
+		}
+	})
+
+	t.Run("DismissDiscoveredRequirement/cross-tenant returns nil", func(t *testing.T) {
+		got := f.DismissDiscoveredRequirement(ctx, "dreq-denied", "user", "duplicate")
+		if got != nil {
+			t.Fatalf("expected nil, got %+v", got)
+		}
+	})
+
+	t.Run("GetCallers/cross-tenant parent sym returns nil", func(t *testing.T) {
+		got := f.GetCallers(ctx, "sym-denied")
+		if got != nil {
+			t.Fatalf("expected nil, got %v", got)
+		}
+	})
+
+	t.Run("GetCallers/allowed sym filters cross-tenant callers", func(t *testing.T) {
+		// sym-allowed has sym-denied as a caller (cross-repo edge).
+		// sym-denied is in repo-denied which is not in the tenant's allowed set.
+		// So GetCallers(sym-allowed) should return an empty (not nil) slice.
+		got := f.GetCallers(ctx, "sym-allowed")
+		for _, id := range got {
+			if id == "sym-denied" {
+				t.Fatal("cross-tenant caller sym-denied should not appear in GetCallers result")
+			}
+		}
+	})
+
+	t.Run("GetCallees/cross-tenant parent sym returns nil", func(t *testing.T) {
+		got := f.GetCallees(ctx, "sym-denied")
+		if got != nil {
+			t.Fatalf("expected nil, got %v", got)
+		}
+	})
+
+	t.Run("GetTestsForSymbolPersisted/cross-tenant parent sym returns nil", func(t *testing.T) {
+		got := f.GetTestsForSymbolPersisted(ctx, "sym-denied")
+		if got != nil {
+			t.Fatalf("expected nil, got %v", got)
+		}
+	})
+
+	t.Run("GetTestsForSymbolPersisted/allowed sym filters cross-tenant tests", func(t *testing.T) {
+		// sym-allowed is tested by sym-denied (cross-repo edge).
+		// sym-denied is in repo-denied — should be filtered out.
+		got := f.GetTestsForSymbolPersisted(ctx, "sym-allowed")
+		for _, id := range got {
+			if id == "sym-denied" {
+				t.Fatal("cross-tenant test sym-denied should not appear in GetTestsForSymbolPersisted result")
+			}
+		}
+	})
+}
+
+// TestTenantFilteredStoreCallGraphFilter_DoesNotMutateInnerStore is the D-029
+// slice-safety regression test. GetCallers must not mutate the slice backing
+// array held by the inner MemStore.
+func TestTenantFilteredStoreCallGraphFilter_DoesNotMutateInnerStore(t *testing.T) {
+	ctx := context.Background()
+	inner := NewStore()
+
+	// Seed two repos: sym-A in repo-allowed, sym-B in repo-denied.
+	// sym-A is called by sym-B (cross-repo edge).
+	inner.mu.Lock()
+	inner.repos["repo-allowed"] = &Repository{ID: "repo-allowed"}
+	inner.repos["repo-denied"] = &Repository{ID: "repo-denied"}
+	inner.symbols["sym-A"] = &StoredSymbol{ID: "sym-A", RepoID: "repo-allowed"}
+	inner.symbols["sym-B"] = &StoredSymbol{ID: "sym-B", RepoID: "repo-denied"}
+	// sym-A's callers are [sym-B, sym-A] — sym-B is cross-tenant, sym-A is allowed.
+	inner.reverseCallGraph["sym-A"] = []string{"sym-B", "sym-A"}
+	inner.mu.Unlock()
+
+	f := NewTenantFilteredStore(inner, []string{"repo-allowed"})
+
+	// Call GetCallers via the filtered wrapper.
+	filtered := f.GetCallers(ctx, "sym-A")
+	// sym-B must be filtered out; sym-A must remain.
+	for _, id := range filtered {
+		if id == "sym-B" {
+			t.Fatal("cross-tenant sym-B leaked into GetCallers result")
+		}
+	}
+	if len(filtered) != 1 || filtered[0] != "sym-A" {
+		t.Fatalf("expected [sym-A], got %v", filtered)
+	}
+
+	// Now read the inner store's slice directly and confirm it's unchanged.
+	inner.mu.RLock()
+	original := inner.reverseCallGraph["sym-A"]
+	inner.mu.RUnlock()
+
+	if len(original) != 2 {
+		t.Fatalf("inner store reverseCallGraph mutated: expected 2 entries, got %v", original)
+	}
+	if original[0] != "sym-B" || original[1] != "sym-A" {
+		t.Fatalf("inner store reverseCallGraph mutated: got %v", original)
+	}
+}

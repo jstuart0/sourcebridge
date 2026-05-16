@@ -239,30 +239,113 @@ func (f *TenantFilteredStore) GetLLMUsage(ctx context.Context, repoID string, li
 	return f.inner.GetLLMUsage(ctx, repoID, limit)
 }
 
-// --- Entity-level operations (pass through — repo access validated upstream) ---
+// --- Entity-level operations (gated on returned entity's RepoID) ---
 
+// GetFileSymbols is intentionally ungated: file-keyed access is outside the
+// tenant threat model (fileIDs are derived from repo-scoped operations that are
+// already gated). No public REST/GraphQL/MCP consumer today.
+//
+// Re-gate via inner.GetFileSymbols + hasAccess on each symbol's RepoID before
+// exposing through any public path. See TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated
+// for the enforcement contract.
 func (f *TenantFilteredStore) GetFileSymbols(ctx context.Context, fileID string) []*StoredSymbol {
 	return f.inner.GetFileSymbols(ctx, fileID)
 }
 
+// GetSymbol gates on the returned symbol's RepoID. Returns nil for both
+// "not found" and "belongs to another tenant" to prevent cross-tenant enumeration.
 func (f *TenantFilteredStore) GetSymbol(ctx context.Context, id string) *StoredSymbol {
-	return f.inner.GetSymbol(ctx, id)
+	sym := f.inner.GetSymbol(ctx, id)
+	if sym == nil || !f.hasAccess(sym.RepoID) {
+		return nil
+	}
+	return sym
 }
 
+// GetSymbolsByIDs gates each returned entry on its RepoID. Entries belonging to
+// repos outside the tenant's allowed set are removed from the returned map.
 func (f *TenantFilteredStore) GetSymbolsByIDs(ctx context.Context, ids []string) map[string]*StoredSymbol {
-	return f.inner.GetSymbolsByIDs(ctx, ids)
+	result := f.inner.GetSymbolsByIDs(ctx, ids)
+	for k, sym := range result {
+		if sym == nil || !f.hasAccess(sym.RepoID) {
+			delete(result, k)
+		}
+	}
+	return result
 }
 
+// GetCallers gates on the parent symbol's RepoID first (pre-retrieval parent gate),
+// then filters the returned caller IDs to those whose symbols also belong to an
+// allowed repo.
+//
+// The inner store is used for the caller-symbol batch lookup to avoid routing
+// through the filtered wrapper (which would double-count the access check and
+// could cause recursion if the implementation changes). Caller IDs whose symbols
+// cannot be found are retained conservatively (the caller may be from a repo not
+// yet indexed, not a cross-tenant leak).
 func (f *TenantFilteredStore) GetCallers(ctx context.Context, symbolID string) []string {
-	return f.inner.GetCallers(ctx, symbolID)
+	sym := f.inner.GetSymbol(ctx, symbolID)
+	if sym == nil || !f.hasAccess(sym.RepoID) {
+		return nil
+	}
+	ids := f.inner.GetCallers(ctx, symbolID)
+	if len(ids) == 0 {
+		return ids
+	}
+	callerSyms := f.inner.GetSymbolsByIDs(ctx, ids)
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		cs, found := callerSyms[id]
+		if !found || f.hasAccess(cs.RepoID) {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
+// GetCallees gates on the parent symbol's RepoID first (pre-retrieval parent gate),
+// then filters the returned callee IDs to those whose symbols belong to an allowed repo.
 func (f *TenantFilteredStore) GetCallees(ctx context.Context, symbolID string) []string {
-	return f.inner.GetCallees(ctx, symbolID)
+	sym := f.inner.GetSymbol(ctx, symbolID)
+	if sym == nil || !f.hasAccess(sym.RepoID) {
+		return nil
+	}
+	ids := f.inner.GetCallees(ctx, symbolID)
+	if len(ids) == 0 {
+		return ids
+	}
+	calleeSyms := f.inner.GetSymbolsByIDs(ctx, ids)
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		cs, found := calleeSyms[id]
+		if !found || f.hasAccess(cs.RepoID) {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
+// GetTestsForSymbolPersisted gates on the parent symbol's RepoID first
+// (pre-retrieval parent gate), then filters the returned test-symbol IDs to
+// those whose symbols belong to an allowed repo.
 func (f *TenantFilteredStore) GetTestsForSymbolPersisted(ctx context.Context, symbolID string) []string {
-	return f.inner.GetTestsForSymbolPersisted(ctx, symbolID)
+	sym := f.inner.GetSymbol(ctx, symbolID)
+	if sym == nil || !f.hasAccess(sym.RepoID) {
+		return nil
+	}
+	ids := f.inner.GetTestsForSymbolPersisted(ctx, symbolID)
+	if len(ids) == 0 {
+		return ids
+	}
+	testSyms := f.inner.GetSymbolsByIDs(ctx, ids)
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		ts, found := testSyms[id]
+		if !found || f.hasAccess(ts.RepoID) {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func (f *TenantFilteredStore) GetCallEdges(ctx context.Context, repoID string) []CallEdge {
@@ -276,46 +359,135 @@ func (f *TenantFilteredStore) Stats(ctx context.Context) map[string]int {
 	return f.inner.Stats(ctx)
 }
 
+// GetRequirement gates on the returned requirement's RepoID. Returns nil for
+// both "not found" and "belongs to another tenant" to prevent cross-tenant enumeration.
 func (f *TenantFilteredStore) GetRequirement(ctx context.Context, id string) *StoredRequirement {
-	return f.inner.GetRequirement(ctx, id)
+	req := f.inner.GetRequirement(ctx, id)
+	if req == nil || !f.hasAccess(req.RepoID) {
+		return nil
+	}
+	return req
 }
 
+// GetRequirementsByIDs gates each returned entry on its RepoID. Entries belonging
+// to repos outside the tenant's allowed set are removed from the returned map.
 func (f *TenantFilteredStore) GetRequirementsByIDs(ctx context.Context, ids []string) map[string]*StoredRequirement {
-	return f.inner.GetRequirementsByIDs(ctx, ids)
+	result := f.inner.GetRequirementsByIDs(ctx, ids)
+	for k, req := range result {
+		if req == nil || !f.hasAccess(req.RepoID) {
+			delete(result, k)
+		}
+	}
+	return result
 }
 
+// UpdateRequirementFields gates on the requirement's RepoID before delegating
+// to the inner store. Returns nil for both "not found" and "belongs to another
+// tenant" to prevent cross-tenant enumeration. The pre-write access check ensures
+// a tenant cannot modify another tenant's requirements even with a known ID.
 func (f *TenantFilteredStore) UpdateRequirementFields(ctx context.Context, id string, fields RequirementUpdate) *StoredRequirement {
+	req := f.inner.GetRequirement(ctx, id)
+	if req == nil || !f.hasAccess(req.RepoID) {
+		return nil
+	}
 	return f.inner.UpdateRequirementFields(ctx, id, fields)
 }
 
+// GetLink gates on the returned link's RepoID. Returns nil for both "not found"
+// and "belongs to another tenant" to prevent cross-tenant enumeration.
 func (f *TenantFilteredStore) GetLink(ctx context.Context, id string) *StoredLink {
-	return f.inner.GetLink(ctx, id)
+	link := f.inner.GetLink(ctx, id)
+	if link == nil || !f.hasAccess(link.RepoID) {
+		return nil
+	}
+	return link
 }
 
+// GetLinksForRequirement gates on the parent requirement's RepoID first
+// (pre-retrieval parent gate), then post-filters the returned links to those
+// whose RepoID is in the tenant's allowed set.
 func (f *TenantFilteredStore) GetLinksForRequirement(ctx context.Context, reqID string, includeRejected bool) []*StoredLink {
-	return f.inner.GetLinksForRequirement(ctx, reqID, includeRejected)
+	req := f.inner.GetRequirement(ctx, reqID)
+	if req == nil || !f.hasAccess(req.RepoID) {
+		return nil
+	}
+	all := f.inner.GetLinksForRequirement(ctx, reqID, includeRejected)
+	if len(all) == 0 {
+		return all
+	}
+	out := make([]*StoredLink, 0, len(all))
+	for _, link := range all {
+		if link != nil && f.hasAccess(link.RepoID) {
+			out = append(out, link)
+		}
+	}
+	return out
 }
 
+// GetLinksForSymbol gates on the parent symbol's RepoID first
+// (pre-retrieval parent gate), then post-filters the returned links to those
+// whose RepoID is in the tenant's allowed set.
 func (f *TenantFilteredStore) GetLinksForSymbol(ctx context.Context, symID string, includeRejected bool) []*StoredLink {
-	return f.inner.GetLinksForSymbol(ctx, symID, includeRejected)
+	sym := f.inner.GetSymbol(ctx, symID)
+	if sym == nil || !f.hasAccess(sym.RepoID) {
+		return nil
+	}
+	all := f.inner.GetLinksForSymbol(ctx, symID, includeRejected)
+	if len(all) == 0 {
+		return all
+	}
+	out := make([]*StoredLink, 0, len(all))
+	for _, link := range all {
+		if link != nil && f.hasAccess(link.RepoID) {
+			out = append(out, link)
+		}
+	}
+	return out
 }
 
+// GetLinksForFile is intentionally ungated: file-keyed access is outside the
+// tenant threat model (fileIDs are derived from repo-scoped operations that are
+// already gated). No public REST/GraphQL/MCP consumer today.
+//
+// Re-gate via inner.GetLinksForFile + hasAccess on each link's RepoID before
+// exposing through any public path. See TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated
+// for the enforcement contract.
 func (f *TenantFilteredStore) GetLinksForFile(ctx context.Context, fileID string, startLine, endLine int, minConfidence float64) []*StoredLink {
 	return f.inner.GetLinksForFile(ctx, fileID, startLine, endLine, minConfidence)
 }
 
+// StoreEmbedding is intentionally ungated: no public REST/GraphQL/MCP consumer today.
+//
+// Re-gate via hasAccess on the embedding's target entity's repo before exposing
+// through any public path. See TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated
+// for the enforcement contract.
 func (f *TenantFilteredStore) StoreEmbedding(ctx context.Context, record *EmbeddingRecord) {
 	f.inner.StoreEmbedding(ctx, record)
 }
 
+// GetEmbedding is intentionally ungated: no public REST/GraphQL/MCP consumer today.
+//
+// Re-gate via hasAccess on the embedding's target entity's repo before exposing
+// through any public path. See TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated
+// for the enforcement contract.
 func (f *TenantFilteredStore) GetEmbedding(ctx context.Context, targetID string) *EmbeddingRecord {
 	return f.inner.GetEmbedding(ctx, targetID)
 }
 
+// StoreReviewResult is intentionally ungated: no public REST/GraphQL/MCP consumer today.
+//
+// Re-gate via hasAccess on the review result's target entity's repo before exposing
+// through any public path. See TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated
+// for the enforcement contract.
 func (f *TenantFilteredStore) StoreReviewResult(ctx context.Context, record *ReviewResultRecord) {
 	f.inner.StoreReviewResult(ctx, record)
 }
 
+// GetReviewResults is intentionally ungated: no public REST/GraphQL/MCP consumer today.
+//
+// Re-gate via hasAccess on the review result's target entity's repo before exposing
+// through any public path. See TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated
+// for the enforcement contract.
 func (f *TenantFilteredStore) GetReviewResults(ctx context.Context, targetID string) []*ReviewResultRecord {
 	return f.inner.GetReviewResults(ctx, targetID)
 }
@@ -392,15 +564,35 @@ func (f *TenantFilteredStore) GetDiscoveredRequirements(ctx context.Context, rep
 	return f.inner.GetDiscoveredRequirements(ctx, repoID, status, confidence, limit, offset)
 }
 
+// GetDiscoveredRequirement gates on the returned requirement's RepoID. Returns nil
+// for both "not found" and "belongs to another tenant" to prevent cross-tenant enumeration.
 func (f *TenantFilteredStore) GetDiscoveredRequirement(ctx context.Context, id string) *DiscoveredRequirement {
-	return f.inner.GetDiscoveredRequirement(ctx, id)
+	req := f.inner.GetDiscoveredRequirement(ctx, id)
+	if req == nil || !f.hasAccess(req.RepoID) {
+		return nil
+	}
+	return req
 }
 
+// PromoteDiscoveredRequirement gates on the discovered requirement's RepoID before
+// delegating to the inner store. Returns nil for both "not found" and "belongs to
+// another tenant" to prevent cross-tenant mutation.
 func (f *TenantFilteredStore) PromoteDiscoveredRequirement(ctx context.Context, id string, requirementID string) *DiscoveredRequirement {
+	req := f.inner.GetDiscoveredRequirement(ctx, id)
+	if req == nil || !f.hasAccess(req.RepoID) {
+		return nil
+	}
 	return f.inner.PromoteDiscoveredRequirement(ctx, id, requirementID)
 }
 
+// DismissDiscoveredRequirement gates on the discovered requirement's RepoID before
+// delegating to the inner store. Returns nil for both "not found" and "belongs to
+// another tenant" to prevent cross-tenant mutation.
 func (f *TenantFilteredStore) DismissDiscoveredRequirement(ctx context.Context, id string, dismissedBy string, reason string) *DiscoveredRequirement {
+	req := f.inner.GetDiscoveredRequirement(ctx, id)
+	if req == nil || !f.hasAccess(req.RepoID) {
+		return nil
+	}
 	return f.inner.DismissDiscoveredRequirement(ctx, id, dismissedBy, reason)
 }
 
