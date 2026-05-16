@@ -75,8 +75,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// OSS local-auth uses a fixed username ("admin@localhost") so this fires after
 	// N total failed attempts regardless of source IP — guarding against distributed
 	// brute-force attacks that rotate IPs to evade the per-IP httprate gate.
-	const loginUsername = "admin@localhost"
-	if s.loginLimiter != nil && !s.loginLimiter.Allow(loginUsername) {
+	if s.loginLimiter != nil && !s.loginLimiter.Allow(localAuthUsername) {
 		s.loginLimiter.WriteRejection(w)
 		return
 	}

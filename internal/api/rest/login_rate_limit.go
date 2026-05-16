@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+// localAuthUsername is the rate-limit key used by both /auth/login and
+// /auth/desktop/local-login for OSS single-user local auth.
+//
+// OSS single-user only. Multi-user paths MUST use the actual submitted
+// username — do not import this constant. See CA-339 / CA-207 / CLAUDE.md
+// for the multi-user extension contract.
+const localAuthUsername = "admin@localhost"
+
 // loginRateLimiter provides a per-username sliding-window rate limit for
 // local-auth login attempts. It complements the existing per-IP httprate
 // middleware: per-IP limits protect against volumetric floods from a single
@@ -99,12 +107,11 @@ func (b *loginBucket) allow(limit int, window time.Duration) bool {
 func secondsString(d time.Duration) string {
 	secs := int(d.Seconds())
 	if secs < 1 {
+		// Zero-window disabling is handled at the caller via limit <= 0,
+		// not by this clamp. Floor at 1 to produce a meaningful Retry-After.
 		secs = 1
 	}
 	// Avoid importing strconv — hand-roll the int → string conversion.
-	if secs == 0 {
-		return "0"
-	}
 	buf := make([]byte, 0, 10)
 	n := secs
 	for n > 0 {

@@ -15,7 +15,7 @@ import (
 func TestLoginRateLimiter_AllowsUnderLimit(t *testing.T) {
 	l := newLoginRateLimiter(5, time.Minute)
 	for i := 0; i < 5; i++ {
-		if !l.Allow("admin@localhost") {
+		if !l.Allow(localAuthUsername) {
 			t.Fatalf("attempt %d should be allowed (under limit)", i+1)
 		}
 	}
@@ -26,9 +26,9 @@ func TestLoginRateLimiter_AllowsUnderLimit(t *testing.T) {
 func TestLoginRateLimiter_RejectsOnExceed(t *testing.T) {
 	l := newLoginRateLimiter(5, time.Minute)
 	for i := 0; i < 5; i++ {
-		l.Allow("admin@localhost")
+		l.Allow(localAuthUsername)
 	}
-	if l.Allow("admin@localhost") {
+	if l.Allow(localAuthUsername) {
 		t.Fatal("6th attempt should be rejected (exceeds limit)")
 	}
 }
@@ -38,7 +38,7 @@ func TestLoginRateLimiter_RejectsOnExceed(t *testing.T) {
 func TestLoginRateLimiter_ZeroLimitDisabled(t *testing.T) {
 	l := newLoginRateLimiter(0, time.Minute)
 	for i := 0; i < 1000; i++ {
-		if !l.Allow("admin@localhost") {
+		if !l.Allow(localAuthUsername) {
 			t.Fatalf("disabled limiter (limit=0) must always allow; rejected at call %d", i+1)
 		}
 	}
@@ -119,5 +119,14 @@ func TestSecondsString(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("secondsString(%v) = %q, want %q", tc.d, got, tc.want)
 		}
+	}
+}
+
+// TestSecondsString_ClampZeroToOne pins that a zero duration is floored to 1,
+// confirming the unreachable secs==0 branch was correctly removed (X-L1 / CA-469).
+func TestSecondsString_ClampZeroToOne(t *testing.T) {
+	got := secondsString(0)
+	if got != "1" {
+		t.Fatalf("secondsString(0) = %q, want %q", got, "1")
 	}
 }

@@ -227,8 +227,7 @@ func (s *Server) handleDesktopLocalLogin(w http.ResponseWriter, r *http.Request)
 	// CA-339 / CA-207: same per-username gate as handleLogin. The desktop
 	// local-login endpoint shares the same loginLimiter instance so attempts
 	// across both paths consume from the same per-username budget.
-	const loginUsername = "admin@localhost"
-	if s.loginLimiter != nil && !s.loginLimiter.Allow(loginUsername) {
+	if s.loginLimiter != nil && !s.loginLimiter.Allow(localAuthUsername) {
 		s.loginLimiter.WriteRejection(w)
 		return
 	}
