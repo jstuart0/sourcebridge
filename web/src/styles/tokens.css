@@ -73,6 +73,9 @@
   --danger-bg-hover: color-mix(in oklab, oklch(0.66 0.17 24) 26%, transparent);
   --danger-border: color-mix(in oklab, oklch(0.66 0.17 24) 35%, transparent);
   --danger-text: oklch(0.79 0.12 24);
+
+  /* CA-495: semantic alias — resolves automatically per theme */
+  --bg-subtle: var(--bg-surface-2);
 }
 
 :root[data-theme="light"],
@@ -111,6 +114,9 @@
   --danger-bg-hover: color-mix(in oklab, oklch(0.62 0.17 24) 16%, transparent);
   --danger-border: color-mix(in oklab, oklch(0.62 0.17 24) 24%, transparent);
   --danger-text: oklch(0.54 0.17 24);
+
+  /* CA-495: semantic alias — resolves automatically per theme */
+  --bg-subtle: var(--bg-surface-2);
 }
 
 :root {

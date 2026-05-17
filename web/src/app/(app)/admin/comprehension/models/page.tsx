@@ -225,7 +225,7 @@ export default function ModelsPage() {
   };
 
   const inputClass =
-    "w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent-primary)]";
+    "w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)]";
   const selectClass = inputClass;
 
   function renderEditableRow(model: ModelCapability, form: Partial<ModelCapability>, setForm: (f: Partial<ModelCapability>) => void) {
@@ -462,15 +462,15 @@ export default function ModelsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--border-subtle)] text-left text-[var(--text-secondary)]">
-                <th className="pb-2 pr-3 font-medium">Model</th>
-                <th className="pb-2 pr-3 font-medium">Provider</th>
-                <th className="pb-2 pr-3 font-medium">Context</th>
-                <th className="pb-2 pr-3 font-medium">Instruction</th>
-                <th className="pb-2 pr-3 font-medium">JSON</th>
-                <th className="pb-2 pr-3 font-medium">Tool Use</th>
-                <th className="pb-2 pr-3 font-medium" title="Controls quality gate strictness: frontier=strictest, local=most relaxed">Tier</th>
-                <th className="pb-2 pr-3 font-medium">Source</th>
-                <th className="pb-2 font-medium">Actions</th>
+                <th scope="col" className="pb-2 pr-3 font-medium">Model</th>
+                <th scope="col" className="pb-2 pr-3 font-medium">Provider</th>
+                <th scope="col" className="pb-2 pr-3 font-medium">Context</th>
+                <th scope="col" className="pb-2 pr-3 font-medium">Instruction</th>
+                <th scope="col" className="pb-2 pr-3 font-medium">JSON</th>
+                <th scope="col" className="pb-2 pr-3 font-medium">Tool Use</th>
+                <th scope="col" className="pb-2 pr-3 font-medium" title="Controls quality gate strictness: frontier=strictest, local=most relaxed">Tier</th>
+                <th scope="col" className="pb-2 pr-3 font-medium">Source</th>
+                <th scope="col" className="pb-2 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -535,10 +535,10 @@ export default function ModelsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--border-subtle)] text-left text-[var(--text-secondary)]">
-                  <th className="pb-2 pr-3 font-medium">Model</th>
-                  <th className="pb-2 pr-3 font-medium">Provider</th>
-                  <th className="pb-2 pr-3 font-medium">Context</th>
-                  <th className="pb-2 font-medium">Source</th>
+                  <th scope="col" className="pb-2 pr-3 font-medium">Model</th>
+                  <th scope="col" className="pb-2 pr-3 font-medium">Provider</th>
+                  <th scope="col" className="pb-2 pr-3 font-medium">Context</th>
+                  <th scope="col" className="pb-2 font-medium">Source</th>
                 </tr>
               </thead>
               <tbody>
