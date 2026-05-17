@@ -712,7 +712,10 @@ func (f *TenantFilteredStore) GetSymbolCrossRepoRefs(ctx context.Context, symbol
 	if err != nil || len(refs) == 0 {
 		return refs, err
 	}
-	filtered := refs[:0:len(refs)]
+	// Slice safety: use make() not in-place filter — MemStore returns backing slices;
+	// in-place mutation would corrupt the inner store. Matches the May-16
+	// GetCallers/GetCallees/GetTestsForSymbolPersisted pattern.
+	filtered := make([]*CrossRepoRef, 0, len(refs))
 	for _, ref := range refs {
 		if f.hasAccess(ref.SourceRepoID) && f.hasAccess(ref.TargetRepoID) {
 			filtered = append(filtered, ref)

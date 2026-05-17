@@ -362,8 +362,11 @@ func TestFilteredOSSPassThroughStoreAPIContract(t *testing.T) {
 //   GetFileSymbols, GetLinksForFile. All marked with load-bearing
 //   comments in filtered.go. Re-gate before adding any public consumer.
 //
-// Adding a new ID-keyed Get/Update/Promote/Dismiss method to TenantFilteredStore
+// Post-CA-497 total: 8 federation + 16 ID-keyed + 1 cross-repo refs = 25 gated methods.
+//
+// Adding a new ID-keyed Get/Update/Promote/Dismiss/Verify/Store method to TenantFilteredStore
 // MUST come with an entry in this canary OR a load-bearing comment justifying exemption.
+// Current coverage: 16 ID-keyed + 1 cross-repo refs.
 func TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated(t *testing.T) {
 	ctx := context.Background()
 
@@ -564,6 +567,54 @@ func TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated(t *testing.T) {
 			}
 		}
 	})
+
+	// --- GetSymbolCrossRepoRefs (ID-keyed, cross-repo category) ---
+
+	t.Run("GetSymbolCrossRepoRefs/cross-tenant source sym returns nil", func(t *testing.T) {
+		// sym-denied is in repo-denied — not in tenant's allowed set.
+		got, err := f.GetSymbolCrossRepoRefs(ctx, "sym-denied")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil, got %v", got)
+		}
+	})
+
+	// --- StoreAPIContract (ID-keyed) —--
+
+	t.Run("StoreAPIContract/cross-tenant denied", func(t *testing.T) {
+		// repo-denied is not in the tenant's allowed set; gate must reject.
+		contract := &APIContract{RepoID: "repo-denied"}
+		err := f.StoreAPIContract(ctx, contract)
+		if err == nil {
+			t.Fatal("expected access-denied error for cross-tenant contract, got nil")
+		}
+	})
+
+	t.Run("StoreAPIContract/allowed-tenant inner called", func(t *testing.T) {
+		// Use filteredWithRecorder so we can verify the inner was called.
+		// The MemStore inner returns a federation-not-supported error; we check
+		// that the gate passed (inner.StoreAPIContract was reached, counter == 1).
+		fRec, rec := filteredWithRecorder("repo-allowed")
+		contract := &APIContract{RepoID: "repo-allowed"}
+		_ = fRec.StoreAPIContract(ctx, contract)
+		if got := rec.storeAPIContractCalls.Load(); got != 1 {
+			t.Fatalf("inner.StoreAPIContract called %d times; want 1 (gate should pass through)", got)
+		}
+	})
+
+	// --- VerifyLink (ID-keyed) ---
+
+	t.Run("VerifyLink/allowed link returns result", func(t *testing.T) {
+		// link-allowed is seeded in repo-allowed above. The gate reads
+		// inner.GetLink → non-nil + hasAccess → calls inner.VerifyLink.
+		// MemStore.VerifyLink returns the updated link.
+		result := f.VerifyLink(ctx, "link-allowed", true, "user-A")
+		if result == nil {
+			t.Fatal("expected non-nil link from VerifyLink on permitted link, got nil")
+		}
+	})
 }
 
 // TestTenantFilteredStoreCallGraphFilter_DoesNotMutateInnerStore is the D-029
@@ -692,5 +743,173 @@ func TestTenantFilteredStore_StatsReturnsEmpty(t *testing.T) {
 
 	if len(got) != 0 {
 		t.Fatalf("TenantFilteredStore.Stats() must return empty map; got %v", got)
+	}
+}
+
+// =============================================================================
+// CA-493 — GetSymbolCrossRepoRefs slice safety + filter correctness tests
+// =============================================================================
+
+// crossRepoRefStub embeds a real *Store and overrides GetSymbolCrossRepoRefs so
+// positive-path filter tests can return controlled ref data. The MemStore's
+// production implementation returns nil (federation not wired in-memory), so
+// tests that need to exercise the filtering logic need this stub.
+type crossRepoRefStub struct {
+	*Store
+	symID string
+	refs  []*CrossRepoRef
+}
+
+func (s *crossRepoRefStub) GetSymbolCrossRepoRefs(_ context.Context, symbolID string) ([]*CrossRepoRef, error) {
+	if symbolID == s.symID {
+		return s.refs, nil
+	}
+	return nil, nil
+}
+
+// TestFilteredGetSymbolCrossRepoRefs_FiltersInAccessibleTargetRepo verifies that
+// refs whose TargetRepoID is not in the tenant's allowed set are removed from the
+// returned slice. Only refs where both SourceRepoID and TargetRepoID are accessible
+// should pass through.
+func TestFilteredGetSymbolCrossRepoRefs_FiltersInAccessibleTargetRepo(t *testing.T) {
+	ctx := context.Background()
+	base := NewStore()
+	base.mu.Lock()
+	base.repos["repo-allowed"] = &Repository{ID: "repo-allowed"}
+	base.symbols["sym-allowed"] = &StoredSymbol{ID: "sym-allowed", RepoID: "repo-allowed"}
+	base.mu.Unlock()
+
+	stub := &crossRepoRefStub{
+		Store: base,
+		symID: "sym-allowed",
+		refs: []*CrossRepoRef{
+			{ID: "ref-1", SourceRepoID: "repo-allowed", TargetRepoID: "repo-allowed"},
+			{ID: "ref-2", SourceRepoID: "repo-allowed", TargetRepoID: "repo-denied"},
+		},
+	}
+	f := NewTenantFilteredStore(stub, []string{"repo-allowed"})
+
+	got, err := f.GetSymbolCrossRepoRefs(ctx, "sym-allowed")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 ref, got %d: %v", len(got), got)
+	}
+	if got[0].TargetRepoID != "repo-allowed" {
+		t.Fatalf("expected TargetRepoID=repo-allowed, got %q", got[0].TargetRepoID)
+	}
+}
+
+// TestFilteredGetSymbolCrossRepoRefs_FiltersInAccessibleSourceRepo verifies that
+// refs whose SourceRepoID is not in the tenant's allowed set are removed from the
+// returned slice.
+func TestFilteredGetSymbolCrossRepoRefs_FiltersInAccessibleSourceRepo(t *testing.T) {
+	ctx := context.Background()
+	base := NewStore()
+	base.mu.Lock()
+	base.repos["repo-allowed"] = &Repository{ID: "repo-allowed"}
+	base.symbols["sym-allowed"] = &StoredSymbol{ID: "sym-allowed", RepoID: "repo-allowed"}
+	base.mu.Unlock()
+
+	stub := &crossRepoRefStub{
+		Store: base,
+		symID: "sym-allowed",
+		refs: []*CrossRepoRef{
+			{ID: "ref-1", SourceRepoID: "repo-allowed", TargetRepoID: "repo-allowed"},
+			{ID: "ref-2", SourceRepoID: "repo-denied", TargetRepoID: "repo-allowed"},
+		},
+	}
+	f := NewTenantFilteredStore(stub, []string{"repo-allowed"})
+
+	got, err := f.GetSymbolCrossRepoRefs(ctx, "sym-allowed")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 ref, got %d: %v", len(got), got)
+	}
+	if got[0].SourceRepoID != "repo-allowed" {
+		t.Fatalf("expected SourceRepoID=repo-allowed, got %q", got[0].SourceRepoID)
+	}
+}
+
+// TestFilteredGetSymbolCrossRepoRefs_DoesNotMutateInnerStore is the CA-493 slice-safety
+// regression test. GetSymbolCrossRepoRefs must not mutate the backing slice returned
+// by the inner store. Calling it twice must yield the same result both times.
+//
+// This test FAILS with the in-place filter `refs[:0:len(refs)]` and PASSES
+// with `make([]*CrossRepoRef, 0, len(refs))` — proving the regression guard is live.
+func TestFilteredGetSymbolCrossRepoRefs_DoesNotMutateInnerStore(t *testing.T) {
+	ctx := context.Background()
+	base := NewStore()
+	base.mu.Lock()
+	base.repos["repo-allowed"] = &Repository{ID: "repo-allowed"}
+	base.symbols["sym-allowed"] = &StoredSymbol{ID: "sym-allowed", RepoID: "repo-allowed"}
+	base.mu.Unlock()
+
+	// Backing slice: DENIED first, then ALLOWED. The in-place filter
+	// `refs[:0:len(refs)]` would write ref-allowed into backing[0], overwriting
+	// ref-denied. On a second call, the stub returns the same (now-mutated) backing
+	// slice, and both elements would have TargetRepoID="repo-allowed", causing the
+	// second call to return 2 refs instead of 1. The make() path never touches the
+	// backing array, so both calls return exactly [ref-allowed].
+	backingRefs := []*CrossRepoRef{
+		{ID: "ref-denied", SourceRepoID: "repo-allowed", TargetRepoID: "repo-denied"},
+		{ID: "ref-allowed", SourceRepoID: "repo-allowed", TargetRepoID: "repo-allowed"},
+	}
+	stub := &crossRepoRefStub{
+		Store: base,
+		symID: "sym-allowed",
+		refs:  backingRefs,
+	}
+	f := NewTenantFilteredStore(stub, []string{"repo-allowed"})
+
+	first, err := f.GetSymbolCrossRepoRefs(ctx, "sym-allowed")
+	if err != nil {
+		t.Fatalf("first call error: %v", err)
+	}
+	if len(first) != 1 || first[0].ID != "ref-allowed" {
+		t.Fatalf("first call: expected [ref-allowed], got %v", first)
+	}
+
+	second, err := f.GetSymbolCrossRepoRefs(ctx, "sym-allowed")
+	if err != nil {
+		t.Fatalf("second call error: %v", err)
+	}
+	if len(second) != 1 || second[0].ID != "ref-allowed" {
+		t.Fatalf("second call after first should still yield [ref-allowed]; got %v (inner store mutated)", second)
+	}
+
+	// Confirm the backing slice itself was not mutated: ref-denied must still be at
+	// index 0 (the in-place filter would overwrite it with ref-allowed).
+	if len(backingRefs) != 2 {
+		t.Fatalf("inner store backing slice length mutated: expected len=2, got %d", len(backingRefs))
+	}
+	if backingRefs[0].ID != "ref-denied" {
+		t.Fatalf("inner store backing[0] mutated: expected ref-denied, got %q (in-place filter corruption)", backingRefs[0].ID)
+	}
+}
+
+// TestFilteredVerifyLinkPermitted_CallsInnerStore (T34-pos, per D-002 T-L1 correction):
+// VerifyLink for a link whose repo IS in the allowed set must call inner.VerifyLink exactly
+// once. Uses filteredWithRecorder + a pre-seeded link so the GetLink gate passes.
+func TestFilteredVerifyLinkPermitted_CallsInnerStore(t *testing.T) {
+	ctx := context.Background()
+	// Build a recorder wrapping a fresh store, then seed a link in the allowed repo.
+	rec := &callRecorder{GraphStore: NewStore()}
+	inner := rec.GraphStore.(*Store)
+	inner.mu.Lock()
+	inner.repos["repo-A"] = &Repository{ID: "repo-A"}
+	inner.links["link-A"] = &StoredLink{ID: "link-A", RepoID: "repo-A", SymbolID: "sym-A"}
+	inner.mu.Unlock()
+
+	f := NewTenantFilteredStore(rec, []string{"repo-A"})
+	result := f.VerifyLink(ctx, "link-A", true, "user-A")
+	if result == nil {
+		t.Fatal("expected non-nil link from VerifyLink on permitted link, got nil")
+	}
+	if got := rec.verifyLinkCalls.Load(); got != 1 {
+		t.Fatalf("inner.VerifyLink called %d times; want 1", got)
 	}
 }

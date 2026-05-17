@@ -401,6 +401,8 @@ describe("CA-367 — accordion ARIA: aria-expanded + aria-controls ↔ panel id 
     { headerId: "accordion-header-guide", panelId: "accordion-panel-guide" },
     { headerId: "accordion-header-execution", panelId: "accordion-panel-execution" },
     { headerId: "accordion-header-workflow", panelId: "accordion-panel-workflow" },
+    { headerId: "accordion-header-ask", panelId: "accordion-panel-ask" },
+    { headerId: "accordion-header-explore", panelId: "accordion-panel-explore" },
   ];
 
   for (const { headerId, panelId } of accordions) {
