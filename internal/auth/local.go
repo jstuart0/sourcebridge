@@ -12,6 +12,17 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// localAdminEmail is the canonical email address seeded for the OSS single-user
+// local admin account. It is the single source of truth within this package.
+// External callers MUST use LocalAdminEmail() — do not duplicate the literal.
+const localAdminEmail = "admin@localhost"
+
+// LocalAdminEmail returns the canonical email address seeded for the OSS single-user
+// local admin. It exists solely to allow the login rate limiter in internal/api/rest
+// to assert cohesion between the two packages without exposing the literal.
+// Multi-user paths MUST use the submitted username, not this value.
+func LocalAdminEmail() string { return localAdminEmail }
+
 // LocalUser represents the single OSS user.
 type LocalUser struct {
 	ID           string `json:"id"`
@@ -112,7 +123,7 @@ func (a *LocalAuth) Setup(password string) (*LocalUser, error) {
 
 	a.user = &LocalUser{
 		ID:           id,
-		Email:        "admin@localhost",
+		Email:        localAdminEmail,
 		Name:         "Admin",
 		PasswordHash: string(hash),
 	}

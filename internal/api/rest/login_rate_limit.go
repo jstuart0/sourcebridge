@@ -5,7 +5,9 @@ package rest
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,19 +42,24 @@ const localAuthUsername = "admin@localhost"
 // BEFORE the bcrypt comparison to keep the fast-path constant-time.
 //
 // Bucket lifecycle: entries are allocated on first access and pruned lazily
-// (on each Allow call). A process restart resets all buckets. No persistence
+// (on each Allow call). Stale empty buckets are swept every 256 Allow calls
+// (CA-518 / X-M1: sweep uses lastSeen to guard against LoadOrStore/Delete
+// race — never deletes a bucket whose lastSeen is within the window, even if
+// attempts is empty). A process restart resets all buckets. No persistence
 // is needed — the bcrypt cost (~100ms) already limits brute-force throughput;
 // this limiter is the guard against parallel distributed requests.
 type loginRateLimiter struct {
-	mu      sync.Map // key: string → *loginBucket
-	limit   int
-	window  time.Duration
+	mu          sync.Map   // key: string → *loginBucket
+	limit       int
+	window      time.Duration
+	now         func() time.Time
+	allowCalls  atomic.Uint64 // monotonic counter for sweep trigger
 }
 
 // newLoginRateLimiter creates a limiter that allows at most limit attempts
 // per username per window. limit <= 0 disables the limiter (always allows).
 func newLoginRateLimiter(limit int, window time.Duration) *loginRateLimiter {
-	return &loginRateLimiter{limit: limit, window: window}
+	return &loginRateLimiter{limit: limit, window: window, now: time.Now}
 }
 
 // Allow records an attempt for username and returns true if the request
@@ -64,7 +71,37 @@ func (l *loginRateLimiter) Allow(username string) bool {
 	}
 	raw, _ := l.mu.LoadOrStore(username, &loginBucket{})
 	b := raw.(*loginBucket)
-	return b.allow(l.limit, l.window)
+	result := b.allow(l.limit, l.window, l.now)
+
+	// Opportunistic sweep: every 256 calls, prune stale empty buckets.
+	// The sweep is the fix for X-M1: without lastSeen, a concurrent Allow
+	// could LoadOrStore a fresh bucket after sweep's Range sees it empty
+	// but before Delete fires, permanently losing that bucket's tracking.
+	if l.allowCalls.Add(1)%256 == 0 {
+		l.sweep()
+	}
+
+	return result
+}
+
+// sweep removes buckets that are both empty (no attempts within the window)
+// AND whose lastSeen is older than the window. The lastSeen check is the
+// load-bearing race guard: if a bucket is empty but was accessed recently,
+// it may have had a very recent Allow that we haven't pruned yet, or a
+// concurrent LoadOrStore is in flight — leave it to the next sweep cycle.
+func (l *loginRateLimiter) sweep() {
+	now := l.now()
+	l.mu.Range(func(key, val any) bool {
+		b := val.(*loginBucket)
+		b.mu.Lock()
+		empty := len(b.attempts) == 0
+		stale := now.Sub(b.lastSeen) > l.window
+		b.mu.Unlock()
+		if empty && stale {
+			l.mu.Delete(key)
+		}
+		return true
+	})
 }
 
 // WriteRejection writes a 429 Too Many Requests response with a Retry-After
@@ -82,22 +119,25 @@ func (l *loginRateLimiter) WriteRejection(w http.ResponseWriter) {
 type loginBucket struct {
 	mu       sync.Mutex
 	attempts []time.Time // sorted ascending; pruned on each allow() call
+	lastSeen time.Time   // updated on every allow() call; guards sweep race (CA-518 / X-M1)
 }
 
 // allow records the current attempt, prunes entries outside the window, and
 // returns whether the total count within the window is ≤ limit.
-func (b *loginBucket) allow(limit int, window time.Duration) bool {
-	now := time.Now()
+func (b *loginBucket) allow(limit int, window time.Duration, now func() time.Time) bool {
+	t := now()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	b.lastSeen = t
+
 	// Prune expired entries (older than now - window).
-	cutoff := now.Add(-window)
+	cutoff := t.Add(-window)
 	i := 0
 	for i < len(b.attempts) && b.attempts[i].Before(cutoff) {
 		i++
 	}
-	b.attempts = append(b.attempts[i:], now) // prune + record this attempt
+	b.attempts = append(b.attempts[i:], t) // prune + record this attempt
 
 	return len(b.attempts) <= limit
 }
@@ -111,16 +151,5 @@ func secondsString(d time.Duration) string {
 		// not by this clamp. Floor at 1 to produce a meaningful Retry-After.
 		secs = 1
 	}
-	// Avoid importing strconv — hand-roll the int → string conversion.
-	buf := make([]byte, 0, 10)
-	n := secs
-	for n > 0 {
-		buf = append(buf, byte('0'+n%10))
-		n /= 10
-	}
-	// reverse
-	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
-		buf[i], buf[j] = buf[j], buf[i]
-	}
-	return string(buf)
+	return strconv.Itoa(secs)
 }

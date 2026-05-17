@@ -16,8 +16,8 @@ func TestLocalAuthSetup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup() error: %v", err)
 	}
-	if user.Email != "admin@localhost" {
-		t.Errorf("expected admin@localhost, got %s", user.Email)
+	if user.Email != localAdminEmail {
+		t.Errorf("expected %q, got %s", localAdminEmail, user.Email)
 	}
 	if !auth.IsSetupDone() {
 		t.Error("expected setup done after Setup()")
@@ -64,8 +64,8 @@ func TestLocalAuthLogin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidateToken() error: %v", err)
 	}
-	if claims.Email != "admin@localhost" {
-		t.Errorf("expected admin@localhost, got %s", claims.Email)
+	if claims.Email != localAdminEmail {
+		t.Errorf("expected %q, got %s", localAdminEmail, claims.Email)
 	}
 }
 

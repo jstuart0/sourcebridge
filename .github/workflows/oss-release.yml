@@ -243,6 +243,14 @@ jobs:
         run: echo "ver=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Update Helm Chart version
+        # CA-502: only Chart.yaml (version + appVersion) is patched here.
+        # values.yaml image.tag fields are intentionally left blank — they
+        # default to .Chart.AppVersion in the deployment templates, making
+        # Chart.yaml the single source of truth for the release version.
+        # Setting explicit tag values in values.yaml would break this
+        # auto-propagation and require a second commit per release. Operators
+        # who need to pin a specific image tag (private registry, hotfix) can
+        # override via --set api.image.tag=X.Y.Z at helm install/upgrade time.
         run: |
           VERSION="${{ steps.version.outputs.ver }}"
           yq -i ".version = \"${VERSION}\" | .appVersion = \"${VERSION}\"" deploy/helm/sourcebridge/Chart.yaml

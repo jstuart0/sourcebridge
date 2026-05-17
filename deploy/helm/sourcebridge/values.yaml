@@ -92,8 +92,13 @@ securityContext:
 api:
   image:
     repository: ghcr.io/sourcebridge-ai/sourcebridge-api
-    # CA-472 / O-M2: blank tag defaults to .Chart.AppVersion in the template.
-    # Override with --set api.image.tag=X.Y.Z for private registry or pinned version.
+    # Leave blank — Chart.AppVersion is the single source of truth for the release
+    # version. oss-release.yml patches Chart.yaml (version + appVersion) on every
+    # tagged release; the deployment template resolves this blank tag to
+    # .Chart.AppVersion automatically. Setting an explicit tag here bypasses that
+    # propagation and requires a manual values.yaml commit per release. Override
+    # only when pinning to a specific build (private registry, hotfix):
+    #   --set api.image.tag=X.Y.Z  (CA-472 / O-M2 / CA-502)
     tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
@@ -149,8 +154,9 @@ api:
 web:
   image:
     repository: ghcr.io/sourcebridge-ai/sourcebridge-web
-    # CA-472 / O-M2: blank tag defaults to .Chart.AppVersion in the template.
-    # Override with --set web.image.tag=X.Y.Z for pinned version.
+    # Leave blank — Chart.AppVersion is the single source of truth (see api.image.tag
+    # comment above). Override only when pinning to a specific build:
+    #   --set web.image.tag=X.Y.Z  (CA-472 / O-M2 / CA-502)
     tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
@@ -185,8 +191,9 @@ web:
 worker:
   image:
     repository: ghcr.io/sourcebridge-ai/sourcebridge-worker
-    # CA-472 / O-M2: blank tag defaults to .Chart.AppVersion in the template.
-    # Override with --set worker.image.tag=X.Y.Z for pinned version.
+    # Leave blank — Chart.AppVersion is the single source of truth (see api.image.tag
+    # comment above). Override only when pinning to a specific build:
+    #   --set worker.image.tag=X.Y.Z  (CA-472 / O-M2 / CA-502)
     tag: ""
     pullPolicy: IfNotPresent
   replicas: 1

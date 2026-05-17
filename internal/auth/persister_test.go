@@ -63,8 +63,8 @@ func TestLocalAuthWithPersister(t *testing.T) {
 	if persister.user == nil {
 		t.Fatal("persister should have saved user on setup")
 	}
-	if persister.user.Email != "admin@localhost" {
-		t.Errorf("expected admin@localhost, got %s", persister.user.Email)
+	if persister.user.Email != localAdminEmail {
+		t.Errorf("expected %q, got %s", localAdminEmail, persister.user.Email)
 	}
 }
 

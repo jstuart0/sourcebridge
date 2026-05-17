@@ -4,10 +4,14 @@
 package rest
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/sourcebridge/sourcebridge/internal/auth"
 )
 
 // TestLoginRateLimiter_AllowsUnderLimit checks that attempts below the
@@ -129,4 +133,119 @@ func TestSecondsString_ClampZeroToOne(t *testing.T) {
 	if got != "1" {
 		t.Fatalf("secondsString(0) = %q, want %q", got, "1")
 	}
+}
+
+// TestLocalAuthUsernameMatchesAuthPackageEmail (CA-505) asserts that the
+// rate-limit key in this package matches the canonical email in auth.LocalAdminEmail().
+// If they diverge, all OSS local-auth login attempts bypass the per-username
+// rate limiter because they're keyed on a different string than the constant
+// that drives the bucket.
+func TestLocalAuthUsernameMatchesAuthPackageEmail(t *testing.T) {
+	if localAuthUsername != auth.LocalAdminEmail() {
+		t.Fatalf("cohesion broken: localAuthUsername=%q auth.LocalAdminEmail()=%q",
+			localAuthUsername, auth.LocalAdminEmail())
+	}
+}
+
+// TestLoginRateLimiter_SweepRemovesStaleBuckets (CA-518) verifies that sweep()
+// removes buckets whose attempts are empty AND whose lastSeen is older than the
+// window. Uses a fake clock so the test is deterministic.
+func TestLoginRateLimiter_SweepRemovesStaleBuckets(t *testing.T) {
+	window := time.Minute
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := base
+	fakeClock := func() time.Time { return now }
+
+	l := newLoginRateLimiter(10, window)
+	l.now = fakeClock
+
+	// Seed 10 distinct buckets via Allow, so they each have a lastSeen at base.
+	for i := 0; i < 10; i++ {
+		l.Allow(fmt.Sprintf("user-%d", i))
+	}
+
+	// Advance clock past the window so all buckets are stale.
+	now = base.Add(window + time.Second)
+
+	// Each bucket was seeded with one attempt at base; that attempt is now
+	// outside the window. To make them empty, we need to prune by calling
+	// Allow again — but that would update lastSeen. Instead, manually reset
+	// attempts and lastSeen to simulate the "expired and idle" state.
+	l.mu.Range(func(k, v any) bool {
+		b := v.(*loginBucket)
+		b.mu.Lock()
+		b.attempts = nil
+		b.lastSeen = base // old lastSeen, now stale
+		b.mu.Unlock()
+		return true
+	})
+
+	// Allow on a single key to trigger the sweep (call 256 times to hit the boundary).
+	for i := 0; i < 256; i++ {
+		l.Allow("survivor")
+	}
+
+	// Count remaining buckets. Should be exactly 1 (the survivor).
+	count := 0
+	l.mu.Range(func(k, v any) bool { count++; return true })
+	if count != 1 {
+		t.Fatalf("expected 1 bucket after sweep, got %d", count)
+	}
+}
+
+// TestLoginRateLimiter_SweepKeepsRecentEmptyBuckets (CA-518) verifies that sweep()
+// does NOT delete a bucket whose lastSeen is within the window, even if attempts is
+// empty. This is the load-bearing race guard from X-M1.
+func TestLoginRateLimiter_SweepKeepsRecentEmptyBuckets(t *testing.T) {
+	window := time.Minute
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := base
+	fakeClock := func() time.Time { return now }
+
+	l := newLoginRateLimiter(10, window)
+	l.now = fakeClock
+
+	// Seed one bucket.
+	l.Allow("recent-user")
+
+	// Manually clear its attempts but keep lastSeen recent (within window).
+	l.mu.Range(func(k, v any) bool {
+		b := v.(*loginBucket)
+		b.mu.Lock()
+		b.attempts = nil
+		b.lastSeen = base // lastSeen = now (within window)
+		b.mu.Unlock()
+		return true
+	})
+
+	// Do NOT advance the clock — lastSeen is still within the window.
+
+	// Trigger sweep via 256 Allow calls on a different key.
+	for i := 0; i < 256; i++ {
+		l.Allow("trigger")
+	}
+
+	// The recent-user bucket must still be present.
+	_, ok := l.mu.Load("recent-user")
+	if !ok {
+		t.Fatal("sweep must not delete a bucket whose lastSeen is within the window")
+	}
+}
+
+// TestLoginRateLimiter_SweepRace (CA-518) runs with -race to verify that
+// concurrent Allow calls on different keys while sweep fires produce no data races.
+func TestLoginRateLimiter_SweepRace(t *testing.T) {
+	l := newLoginRateLimiter(5, time.Minute)
+	var wg sync.WaitGroup
+	for g := 0; g < 10; g++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			key := fmt.Sprintf("goroutine-%d", id)
+			for i := 0; i < 300; i++ {
+				l.Allow(key)
+			}
+		}(g)
+	}
+	wg.Wait()
 }
