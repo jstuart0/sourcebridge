@@ -4,6 +4,29 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.15.0-rc.3...v0.15.1-rc.3) (2026-05-17)
+
+
+### Fixed
+
+* **api,workers,ci,graph:** codex r2 reconcile — platformStats non-admin regression + DNS bound comment + yq install + filtered.go file comment ([c5b9c27](https://github.com/sourcebridge-ai/sourcebridge/commit/c5b9c2710f9444feaea31a1ea6966381cdf835e3))
+* **orchestrator,db:** close pre-existing flaky-test class + CA-183 ctx-threading miss ([89fefbf](https://github.com/sourcebridge-ai/sourcebridge/commit/89fefbf00515999311d3dc89829c18d6b7774967))
+* **rest,graph,web:** codex r2 reconcile — CA-518 sweep pruning + canary positive path in line + import try/finally ([1331b6a](https://github.com/sourcebridge-ai/sourcebridge/commit/1331b6a9bab9f28ded7dd27977e6a947d78e68e9))
+* **web:** restore aria-label on InFlightPagesPanel warn-dot ([18909e3](https://github.com/sourcebridge-ai/sourcebridge/commit/18909e390b57e00ce5b0433d66741704a511301e))
+
+
+### Changed
+
+* **auth,rest:** cohesion accessor + secondsString cleanup + loginBucket sweep + doc drift (CA-505, CA-516, CA-517, CA-518, CA-502, CA-513) ([dd66b00](https://github.com/sourcebridge-ai/sourcebridge/commit/dd66b002ed0a60a5bc42289d095230609ffd0069))
+* **rest:** promote localAuthUsername to package constant + remove unreachable secondsString branch (D-L1, X-L1) ([83b862c](https://github.com/sourcebridge-ai/sourcebridge/commit/83b862c3a15812af196c8b6849d8192a812f6b46))
+
+
+### Documentation
+
+* **2026-05-16-deliver-audit-remediation:** CHANGELOG + CLAUDE.md + installation + llm-config ([4dd368c](https://github.com/sourcebridge-ai/sourcebridge/commit/4dd368c9a43be436c758518d931588b53e85b4c3))
+* **CLAUDE.md,CHANGELOG.md:** document 2026-05-17 audit remediation campaign ([4001233](https://github.com/sourcebridge-ai/sourcebridge/commit/40012337f5cdb4e97c6f3127acd37834fe2ed4b3))
+* **README:** bump kustomize overlay example from v0.12.0 to v0.14.0-rc.3 ([f69232d](https://github.com/sourcebridge-ai/sourcebridge/commit/f69232de0bfd325c886678a443a8cda9e79744b8))
+
 ## [0.15.0-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.14.0-rc.3...v0.15.0-rc.3) (2026-05-16)
 
 
