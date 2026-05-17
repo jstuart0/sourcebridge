@@ -395,9 +395,10 @@ func TestEnrichAllRequirements_FilterSkipsEnrichedByDefault(t *testing.T) {
 }
 
 func TestEnrichAllRequirements_ForceIncludesEnriched(t *testing.T) {
-	// force=true → enriched requirements are included in the toEnrich slice.
-	// The orchestrator is nil, so we expect the orchestrator error — but the filter
-	// ran (otherwise we'd get the "nothing to enrich" early return with jobId="none").
+	// force=true → enriched requirements are included in the toEnrich slice,
+	// so RequirementsQueued=1 and a real job ID is returned (not "none").
+	// Uses a real orchestrator (pattern from TestEnrichAllRequirements_BulkEnrichCapFromConfig)
+	// so the assertion observes actual resolver+orchestrator behavior, not just the error path.
 	store := graphstore.NewStore()
 	result := &indexer.IndexResult{RepoName: "repo", RepoPath: "/tmp"}
 	repo, _ := store.StoreIndexResult(t.Context(), result)
@@ -408,21 +409,43 @@ func TestEnrichAllRequirements_ForceIncludesEnriched(t *testing.T) {
 	fw := &enrichFakeWorker{}
 	snap := resolution.Snapshot{Provider: "test", Model: "test-model"}
 	caller := llmcall.New(fw, resolution.NewFrozenResolver(snap), nil)
+
+	jobStore := llm.NewMemStore()
+	orch := orchestrator.New(jobStore, orchestrator.Config{
+		SkipStartupReconciliation: true,
+		Retry:                     orchestrator.RetryPolicy{MaxAttempts: 1},
+	})
+	t.Cleanup(func() { _ = orch.Shutdown(2 * time.Second) })
+
 	r := &Resolver{
 		Deps: &appdeps.AppDeps{
-			EventBus:  events.NewBus(),
-			LLMCaller: caller,
-			Worker:    new(worker.Client),
+			EventBus:     events.NewBus(),
+			LLMCaller:    caller,
+			Worker:       new(worker.Client),
+			Orchestrator: orch,
+			LLMResolver:  newStubLLMResolver(),
 		},
 		Store: store,
 	}
 
 	forceOn := true
-	res, err := r.Mutation().EnrichAllRequirements(ctxAdmin(), repo.ID, &forceOn, nil)
-	// Orchestrator is nil → expects "orchestrator not available" error (reached past filter).
-	// If no error, jobId must not be "none" (meaning at least one req was included).
-	if err == nil && res != nil && res.JobID == "none" {
-		t.Errorf("force=true should have included the enriched requirement, but got nothingToEnrich early return")
+	got, err := r.Mutation().EnrichAllRequirements(ctxAdmin(), repo.ID, &forceOn, nil)
+	if err != nil {
+		t.Fatalf("EnrichAllRequirements: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// force=true includes the already-enriched requirement → queued count is 1.
+	if got.RequirementsQueued != 1 {
+		t.Errorf("expected RequirementsQueued=1 (force includes enriched), got %d", got.RequirementsQueued)
+	}
+	// A real job was enqueued — not the "nothing to do" synthetic result.
+	if got.JobID == "none" {
+		t.Errorf("expected a real job ID (force path reached orchestrator), got %q", got.JobID)
+	}
+	if got.JobID == "" {
+		t.Errorf("expected a non-empty job ID, got empty string")
 	}
 }
 
@@ -533,31 +556,20 @@ func TestEnrichAllRequirements_BulkEnrichCapFromConfig(t *testing.T) {
 	}
 }
 
-// TestEnrichAllRequirements_BatchSizeClampsAt100 verifies that a batchSize
-// argument > 100 is clamped to 100 by the resolver (T-H3 clamp assertion).
+// TestEnrichAllRequirements_BatchSize200_AcceptedWithoutError verifies that a
+// batchSize argument > 100 does not cause EnrichAllRequirements to return an
+// error and that RequirementsQueued reflects the full eligible set.
 //
-// Observable via RequirementsQueued: the cap clamp at 100 is the batchSize
-// per iteration within the job, not a cap on total reqs queued. We verify the
-// resolver's outer clamp: with Config.BulkEnrichMaxRequirements > 100 and
-// batchSize=200, the result.RequirementsQueued <= loadCap but the internal
-// batch variable is clamped. The clamp is at line 1161-1163 in schema.resolvers.go.
-//
-// Strategy: seed 3 unenriched requirements and call with batchSize=200.
-// The job enqueues with batchSize internally clamped to 100; RequirementsQueued
-// reflects all 3 seeded requirements (below the cap). This confirms the resolver
-// path without needing to execute the closure (which would require a real worker).
-//
-// Known gap (D-024b downgrade): this test verifies the resolver accepts
-// batchSize=200 without error and that RequirementsQueued reflects the full
-// input set. The internal clamp at schema.resolvers.go:1161-1163
+// The internal batchSize clamp at schema.resolvers.go:1161-1163
 // (batch > 100 → batch = 100) is verified by code inspection only — observing
-// the runtime batch boundaries would require a counting LLMCaller fake running
-// jobs to completion. D-024b accepted this downgrade; tracked as a follow-up in
-// the campaign CHANGELOG (CHANGELOG entry: "batchSize clamp at 100 in
-// EnrichAllRequirements is verified via code inspection only, not behavioral
-// test observation. Follow-up: wire a counting LLMCaller fake to pin runtime
-// batch boundaries").
-func TestEnrichAllRequirements_BatchSizeClampsAt100(t *testing.T) {
+// the runtime batch slice boundaries requires a counting fake that executes
+// the RunWithContext closure end-to-end, which in turn requires a fake LLM
+// worker capable of running to completion. The clamp lives in the graphql
+// resolver layer (not the orchestrator), so it cannot be intercepted via
+// orchestrator.Config without either (a) breaking the TestResolverStructureCanary
+// or (b) polluting AppDeps with a test-only observer field. Behavioral
+// observation is tracked as CA-506 (Deferred).
+func TestEnrichAllRequirements_BatchSize200_AcceptedWithoutError(t *testing.T) {
 	store := graphstore.NewStore()
 	result := &indexer.IndexResult{RepoName: "repo", RepoPath: "/tmp"}
 	repo, _ := store.StoreIndexResult(t.Context(), result)

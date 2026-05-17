@@ -1257,3 +1257,84 @@ func TestRuntimeHeartbeatAdvancesUpdatedAt_LivingWikiInAllowList(t *testing.T) {
 			"see CA-141 plan step 1.9")
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CA-507: Config.DisableWorkers behavioral tests
+//
+// The DisableWorkers flag is a load-bearing test-only knob documented in the
+// Config struct. These two tests lock its contract:
+//
+//   (a) DisableWorkers=true → jobs stay pending indefinitely (no worker picks
+//       them up). The assertion is a synchronous read — no sleep, no flake.
+//   (b) DisableWorkers=false (zero value) → jobs drain to a terminal state.
+//       The assertion uses require.Eventually with a 2s timeout.
+//
+// (a) proves the flag genuinely skips worker goroutine startup.
+// (b) proves the zero-value (production default) keeps workers running.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestDisableWorkers_JobStaysPending verifies that with DisableWorkers=true no
+// goroutine ever picks up the enqueued job, so a synchronous read immediately
+// after Enqueue returns StatusPending. No sleep — deterministic by construction.
+func TestDisableWorkers_JobStaysPending(t *testing.T) {
+	store := llm.NewMemStore()
+	orch := New(store, Config{
+		DisableWorkers:            true,
+		MaxConcurrency:            2,
+		SkipStartupReconciliation: true,
+		Retry:                     RetryPolicy{MaxAttempts: 1},
+	})
+	t.Cleanup(func() { _ = orch.Shutdown(2 * time.Second) })
+
+	job, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem:   llm.SubsystemKnowledge,
+		LLMProvider: "test",
+		JobType:     "cliff_notes",
+		TargetKey:   "ca507-disable-workers-pending",
+		Run:         func(rt llm.Runtime) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Synchronous read — no worker can have picked this up because
+	// DisableWorkers=true skips goroutine spawn entirely.
+	got := orch.GetJob(job.ID)
+	if got == nil {
+		t.Fatal("GetJob returned nil for just-enqueued job")
+	}
+	if got.Status != llm.StatusPending {
+		t.Errorf("DisableWorkers=true: expected status=%q, got %q", llm.StatusPending, got.Status)
+	}
+}
+
+// TestDisableWorkers_FalseJobDrains verifies that with DisableWorkers=false (the
+// production zero-value default) the job drains to a terminal state within a
+// bounded wait. This is the complement to TestDisableWorkers_JobStaysPending:
+// both must pass so neither side can be silently broken.
+func TestDisableWorkers_FalseJobDrains(t *testing.T) {
+	store := llm.NewMemStore()
+	orch := New(store, Config{
+		DisableWorkers:            false, // explicit: production default
+		MaxConcurrency:            2,
+		SkipStartupReconciliation: true,
+		Retry:                     RetryPolicy{MaxAttempts: 1},
+	})
+	t.Cleanup(func() { _ = orch.Shutdown(2 * time.Second) })
+
+	job, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem:   llm.SubsystemKnowledge,
+		LLMProvider: "test",
+		JobType:     "cliff_notes",
+		TargetKey:   "ca507-enable-workers-drains",
+		Run:         func(rt llm.Runtime) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	waitFor(t, 2*time.Second, func() bool {
+		got := orch.GetJob(job.ID)
+		return got != nil && got.Status.IsTerminal()
+	})
+}
