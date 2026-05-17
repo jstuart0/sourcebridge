@@ -190,13 +190,14 @@ export function InFlightPagesPanel({ jobId }: { jobId: string }) {
                         {warn && (
                           <>
                             <span
+                              role="img"
+                              aria-label="Slow page warning"
                               className="inline-block h-2 w-2 rounded-full bg-amber-400"
                               title={
                                 data.median_completed_ms_known
                                   ? `Elapsed exceeds 3× median for this run (median: ${formatElapsedInFlight(data.median_completed_ms)})`
                                   : `Elapsed exceeds ${formatElapsedInFlight(WARN_THRESHOLD_FLAT_MS)} (flat threshold)`
                               }
-                              aria-hidden="true"
                             />
                             <span className="text-xs text-amber-700 dark:text-amber-300">(slow)</span>
                           </>
