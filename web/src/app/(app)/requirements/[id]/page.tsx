@@ -337,6 +337,39 @@ export default function RequirementDetailPage() {
     trackEvent({ event: "requirement_tab_switched", repositoryId: repoId, metadata: { requirementId: reqId, tab } });
   }
 
+  // CA-510: show a structural skeleton during the initial GraphQL fetch so the
+  // layout doesn't jump from blank to fully-populated.
+  if (reqResult.fetching) {
+    return (
+      <PageFrame>
+        <div className="animate-pulse space-y-6">
+          {/* Breadcrumb slot */}
+          <div className="h-4 w-40 rounded bg-[var(--bg-subtle)]" />
+          {/* Header */}
+          <div className="space-y-2">
+            <div className="h-7 w-2/3 rounded bg-[var(--bg-subtle)]" />
+            <div className="h-4 w-1/2 rounded bg-[var(--bg-subtle)]" />
+          </div>
+          {/* Metadata pills */}
+          <div className="flex gap-2">
+            <div className="h-6 w-20 rounded-full bg-[var(--bg-subtle)]" />
+            <div className="h-6 w-16 rounded-full bg-[var(--bg-subtle)]" />
+          </div>
+          {/* Tab strip */}
+          <div className="flex gap-4 border-b border-[var(--border-default)] pb-2">
+            {[80, 60, 50].map((w, i) => (
+              <div key={i} className="h-5 rounded bg-[var(--bg-subtle)]" style={{ width: w }} />
+            ))}
+          </div>
+          {/* Content panel */}
+          <div className="space-y-3">
+            <div className="h-40 w-full rounded-[var(--control-radius)] bg-[var(--bg-subtle)]" />
+          </div>
+        </div>
+      </PageFrame>
+    );
+  }
+
   if (!req && !reqResult.fetching) {
     return (
       <PageFrame>
@@ -742,7 +775,14 @@ export default function RequirementDetailPage() {
                   <p className="text-xs text-[var(--text-tertiary)]">
                     Follow-up on cached requirement analysis
                   </p>
-                  <div className="max-h-[50vh] space-y-4 overflow-y-auto">
+                  {/* CA-509: role="log" aria-live="polite" announces incoming messages to AT
+                      without re-reading the entire transcript (aria-atomic="false"). */}
+                  <div
+                    role="log"
+                    aria-live="polite"
+                    aria-atomic="false"
+                    className="max-h-[50vh] space-y-4 overflow-y-auto"
+                  >
                     {chatMessages.map((msg, i) => (
                       <div
                         key={i}

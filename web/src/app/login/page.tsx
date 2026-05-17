@@ -6,6 +6,7 @@ import { clearStoredToken, getStoredToken, setStoredToken } from "@/lib/auth-tok
 import { isTokenExpired } from "@/lib/auth-utils";
 import { Brand } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
 
 export default function LoginPage() {
@@ -185,32 +186,32 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-[var(--text-primary)]">
+              <label htmlFor="login-password" className="block text-sm font-medium text-[var(--text-primary)]">
                 {needsSetup ? "Create Password" : "Password"}
               </label>
-              <input
+              <Input
+                id="login-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={needsSetup ? "Choose a strong password…" : "Enter your password…"}
                 required
                 autoFocus
-                className="h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)] outline-none transition-colors placeholder:text-[var(--text-tertiary)] focus:border-[var(--accent-primary)]"
               />
             </div>
 
             {needsSetup ? (
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-[var(--text-primary)]">
+                <label htmlFor="login-confirm-password" className="block text-sm font-medium text-[var(--text-primary)]">
                   Confirm Password
                 </label>
-                <input
+                <Input
+                  id="login-confirm-password"
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Confirm your password…"
                   required
-                  className="h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)] outline-none transition-colors placeholder:text-[var(--text-tertiary)] focus:border-[var(--accent-primary)]"
                 />
               </div>
             ) : null}

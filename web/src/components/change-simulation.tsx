@@ -135,7 +135,7 @@ export function ChangeSimulationPanel({ repositoryId }: { repositoryId: string }
         </div>
 
         {error && (
-          <div className="mt-3 rounded-[var(--control-radius)] border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">
+          <div className="mt-3 rounded-[var(--control-radius)] border border-[var(--danger-border)] bg-[var(--danger-bg)] p-3 text-sm text-[var(--danger-text)]">
             {error}
           </div>
         )}

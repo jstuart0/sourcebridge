@@ -55,7 +55,8 @@ export function CommandPalette({ items, placeholder = "Search commands..." }: Co
           <Command.Input
             data-testid="command-palette-input"
             placeholder={placeholder}
-            className="w-full border-0 border-b border-[var(--border-default,#334155)] bg-transparent px-4 py-3 text-sm text-[var(--text-primary,#e2e8f0)] outline-none"
+            aria-label="Search commands"
+            className="w-full border-0 border-b border-[var(--border-default,#334155)] bg-transparent px-4 py-3 text-sm text-[var(--text-primary,#e2e8f0)] focus:outline focus:outline-2 focus:outline-[var(--accent-primary)] focus:outline-offset-[-2px]"
           />
           <Command.List className="max-h-[18.75rem] overflow-y-auto p-2">
             <Command.Empty className="px-4 py-8 text-center text-sm text-[var(--text-secondary,#94a3b8)]">

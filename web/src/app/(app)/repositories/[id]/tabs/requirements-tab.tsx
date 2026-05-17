@@ -54,6 +54,7 @@ export function RequirementsTab({
     { type: "success" | "error" | "info"; message: string } | null
   >(null);
   const [importContent, setImportContent] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
 
   const currentUser = useCurrentUser();
   const isAdmin = isAdminRole(currentUser?.role);
@@ -152,9 +153,11 @@ export function RequirementsTab({
   }
 
   async function handleImportReqs() {
-    if (!importContent.trim()) return;
+    if (!importContent.trim() || isImporting) return;
+    setIsImporting(true);
     trackEvent({ event: "requirements_imported", repositoryId: repoId });
     const res = await importReqs({ input: { repositoryId: repoId, content: importContent, format: "MARKDOWN" } });
+    setIsImporting(false);
     setImportContent("");
     if (res.error) {
       setLinkResult({ type: "error", message: `Import failed: ${res.error.message}` });
@@ -220,15 +223,21 @@ export function RequirementsTab({
         </div>
       ) : null}
       <div className="mb-4">
+        <label htmlFor="requirements-import-textarea" className="mb-1.5 block text-sm font-medium text-[var(--text-primary)]">
+          Import requirements
+        </label>
         <textarea
+          id="requirements-import-textarea"
           value={importContent}
           onChange={(e) => setImportContent(e.target.value)}
           placeholder="Paste specs or requirements in Markdown format to connect intent to code..."
           rows={3}
-          className="min-h-[7rem] w-full resize-y rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-3 text-sm text-[var(--text-primary)]"
+          aria-busy={isImporting}
+          disabled={isImporting}
+          className="min-h-[7rem] w-full resize-y rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-3 text-sm text-[var(--text-primary)] focus:outline focus:outline-2 focus:outline-[var(--accent-primary)] focus:outline-offset-2 disabled:opacity-60"
         />
-        <Button className="mt-3" onClick={handleImportReqs} disabled={!importContent.trim()}>
-          Import Specs
+        <Button className="mt-3" onClick={handleImportReqs} disabled={!importContent.trim() || isImporting}>
+          {isImporting ? "Importing…" : "Import Specs"}
         </Button>
       </div>
       <Panel>
