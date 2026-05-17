@@ -148,8 +148,13 @@ func TestLocalAuthUsernameMatchesAuthPackageEmail(t *testing.T) {
 }
 
 // TestLoginRateLimiter_SweepRemovesStaleBuckets (CA-518) verifies that sweep()
-// removes buckets whose attempts are empty AND whose lastSeen is older than the
-// window. Uses a fake clock so the test is deterministic.
+// removes buckets whose attempts are ALL aged out AND whose lastSeen is older
+// than the window. This test exercises the production-traffic case: buckets with
+// non-empty attempts slices where every timestamp is outside the window.
+//
+// Prior to the CA-518 M2 fix, sweep only checked len(attempts)==0 without
+// pruning first — so a dormant bucket with one aged-out attempt was never
+// deleted. The new sweep prunes attempts inside the lock, then checks emptiness.
 func TestLoginRateLimiter_SweepRemovesStaleBuckets(t *testing.T) {
 	window := time.Minute
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -159,7 +164,8 @@ func TestLoginRateLimiter_SweepRemovesStaleBuckets(t *testing.T) {
 	l := newLoginRateLimiter(10, window)
 	l.now = fakeClock
 
-	// Seed 10 distinct buckets via Allow, so they each have a lastSeen at base.
+	// Seed 10 distinct buckets via Allow, so they each have a lastSeen at base
+	// AND one attempt timestamp at base.
 	for i := 0; i < 10; i++ {
 		l.Allow(fmt.Sprintf("user-%d", i))
 	}
@@ -167,18 +173,17 @@ func TestLoginRateLimiter_SweepRemovesStaleBuckets(t *testing.T) {
 	// Advance clock past the window so all buckets are stale.
 	now = base.Add(window + time.Second)
 
-	// Each bucket was seeded with one attempt at base; that attempt is now
-	// outside the window. To make them empty, we need to prune by calling
-	// Allow again — but that would update lastSeen. Instead, manually reset
-	// attempts and lastSeen to simulate the "expired and idle" state.
-	l.mu.Range(func(k, v any) bool {
-		b := v.(*loginBucket)
-		b.mu.Lock()
-		b.attempts = nil
-		b.lastSeen = base // old lastSeen, now stale
-		b.mu.Unlock()
-		return true
-	})
+	// At this point every seeded bucket has:
+	//   attempts = [base]  — one entry, all aged out (base is before the new cutoff)
+	//   lastSeen = base    — stale (older than window)
+	//
+	// This is the production-traffic case: the bucket was last used more than
+	// window ago and its attempt is outside the window. sweep() must prune the
+	// attempt slice first, find it empty, then delete the bucket.
+	//
+	// NOTE: we do NOT manually clear attempts here — that was the old approach
+	// which tested a case that never occurs in production (allow() always appends
+	// before pruning, so dormant buckets always have at least one aged-out entry).
 
 	// Allow on a single key to trigger the sweep (call 256 times to hit the boundary).
 	for i := 0; i < 256; i++ {

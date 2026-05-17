@@ -84,20 +84,42 @@ func (l *loginRateLimiter) Allow(username string) bool {
 	return result
 }
 
-// sweep removes buckets that are both empty (no attempts within the window)
-// AND whose lastSeen is older than the window. The lastSeen check is the
-// load-bearing race guard: if a bucket is empty but was accessed recently,
-// it may have had a very recent Allow that we haven't pruned yet, or a
-// concurrent LoadOrStore is in flight — leave it to the next sweep cycle.
+// sweep prunes aged-out attempts from every bucket and then removes buckets
+// that are both empty (all attempts aged out) AND whose lastSeen is older than
+// the window.
+//
+// Why prune inside sweep (CA-518): allow() always appends the current attempt
+// before pruning, so a bucket that was last touched more than window ago still
+// has that final attempt in its slice. Without the in-sweep prune step, sweep
+// would only delete buckets that were explicitly emptied via a second Allow call
+// after all prior attempts aged out — a case that never happens in production
+// (the dormant bucket just sits there forever). Pruning inside sweep is the fix
+// for the production-traffic case: last-attempt-aged-out + bucket-dormant-since.
+//
+// The lastSeen check is the load-bearing race guard from X-M1: if a bucket was
+// accessed recently (within the window), leave it alone even if attempts is now
+// empty — a concurrent Allow may be in flight between the prune and the delete.
 func (l *loginRateLimiter) sweep() {
 	now := l.now()
+	cutoff := now.Add(-l.window)
 	l.mu.Range(func(key, val any) bool {
 		b := val.(*loginBucket)
 		b.mu.Lock()
-		empty := len(b.attempts) == 0
-		stale := now.Sub(b.lastSeen) > l.window
+
+		// Prune aged-out attempts in place (same cutoff logic as allow()).
+		fresh := b.attempts[:0]
+		for _, t := range b.attempts {
+			if t.After(cutoff) {
+				fresh = append(fresh, t)
+			}
+		}
+		b.attempts = fresh
+
+		// Delete only when empty AND not seen recently (race guard preserved).
+		shouldDelete := len(b.attempts) == 0 && now.Sub(b.lastSeen) > l.window
 		b.mu.Unlock()
-		if empty && stale {
+
+		if shouldDelete {
 			l.mu.Delete(key)
 		}
 		return true

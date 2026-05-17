@@ -581,6 +581,32 @@ func TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated(t *testing.T) {
 		}
 	})
 
+	t.Run("GetSymbolCrossRepoRefs/filters denied target repo from mixed result", func(t *testing.T) {
+		// Positive-path canary (D-002 / codex-r2 L1): verify the target-repo filter
+		// inside GetSymbolCrossRepoRefs. Uses crossRepoRefStub (defined below canary)
+		// to return a controlled mixed slice: one ref with an allowed target and one
+		// with a denied target. Only the allowed-target ref should survive.
+		stubInner := &crossRepoRefStub{
+			Store: inner,
+			symID: "sym-allowed",
+			refs: []*CrossRepoRef{
+				{ID: "ref-ok", SourceRepoID: "repo-allowed", TargetRepoID: "repo-allowed"},
+				{ID: "ref-bad", SourceRepoID: "repo-allowed", TargetRepoID: "repo-denied"},
+			},
+		}
+		fStub := NewTenantFilteredStore(stubInner, []string{"repo-allowed"})
+		got, err := fStub.GetSymbolCrossRepoRefs(ctx, "sym-allowed")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("expected 1 ref (allowed target only), got %d: %v", len(got), got)
+		}
+		if got[0].ID != "ref-ok" {
+			t.Fatalf("expected ref-ok, got %q", got[0].ID)
+		}
+	})
+
 	// --- StoreAPIContract (ID-keyed) —--
 
 	t.Run("StoreAPIContract/cross-tenant denied", func(t *testing.T) {

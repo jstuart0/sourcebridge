@@ -156,13 +156,18 @@ export function RequirementsTab({
     if (!importContent.trim() || isImporting) return;
     setIsImporting(true);
     trackEvent({ event: "requirements_imported", repositoryId: repoId });
-    const res = await importReqs({ input: { repositoryId: repoId, content: importContent, format: "MARKDOWN" } });
-    setIsImporting(false);
-    setImportContent("");
-    if (res.error) {
-      setLinkResult({ type: "error", message: `Import failed: ${res.error.message}` });
-    } else {
-      setLinkResult({ type: "success", message: "Requirements imported successfully." });
+    try {
+      const res = await importReqs({ input: { repositoryId: repoId, content: importContent, format: "MARKDOWN" } });
+      setImportContent("");
+      if (res.error) {
+        setLinkResult({ type: "error", message: `Import failed: ${res.error.message}` });
+      } else {
+        setLinkResult({ type: "success", message: "Requirements imported successfully." });
+      }
+    } catch (err) {
+      setLinkResult({ type: "error", message: `Import failed: ${err instanceof Error ? err.message : String(err)}` });
+    } finally {
+      setIsImporting(false);
     }
   }
 
