@@ -115,29 +115,43 @@ spec:
     - Egress
   egress:
     # SurrealDB
+    # CA-494: AND-combinator (single list-item) matching the CA-346/347/355 ingress
+    # pattern. podSelector-only would allow traffic to any pod with this label in
+    # ANY namespace; namespaceSelector narrows it to the release namespace.
     - to:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
               app.kubernetes.io/component: surrealdb
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
       ports:
         - protocol: TCP
           port: 8000
     # Redis (optional caching layer)
+    # CA-494: AND-combinator (single list-item), release-namespace scoped.
     - to:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
               app.kubernetes.io/component: redis
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
       ports:
         - protocol: TCP
           port: 6379
     # Worker gRPC
+    # CA-494: AND-combinator (single list-item), release-namespace scoped.
     - to:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
               app.kubernetes.io/component: worker
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
       ports:
         - protocol: TCP
           port: 50051
@@ -207,11 +221,17 @@ spec:
     - Egress
   egress:
     # SurrealDB
+    # CA-494: AND-combinator (single list-item) matching the CA-346/347/355 ingress
+    # pattern. podSelector-only would allow traffic to any pod with this label in
+    # ANY namespace; namespaceSelector narrows it to the release namespace.
     - to:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
               app.kubernetes.io/component: surrealdb
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
       ports:
         - protocol: TCP
           port: 8000
@@ -275,11 +295,15 @@ spec:
     - Egress
   egress:
     # API proxy (SOURCEBRIDGE_WEB_DEV_PROXY → api service on :8080)
+    # CA-494: AND-combinator (single list-item), release-namespace scoped.
     - to:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
               app.kubernetes.io/component: api
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
       ports:
         - protocol: TCP
           port: 8080

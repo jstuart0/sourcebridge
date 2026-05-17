@@ -217,10 +217,19 @@ spec:
     - Egress
   egress:
     # SurrealDB
+    # CA-494 / CA-514: AND-combinator: single list-item; podSelector + namespaceSelector
+    # under same - so only surrealdb pods in the sourcebridge namespace are matched.
+    # podSelector-only (the previous shape) would allow traffic to any pod carrying
+    # app.kubernetes.io/name: surrealdb in ANY namespace. Matches the CA-346/347/355
+    # AND-combinator pattern applied to every ingress peer and the allow-api-egress /
+    # allow-web-egress peers in this file.
     - to:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: surrealdb
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sourcebridge
       ports:
         - protocol: TCP
           port: 8000

@@ -32,6 +32,9 @@ spec:
           # CA-471 / O-M1: pin to 7.4-alpine (matches Helm values.yaml:278 CA-356).
           # Floating :7-alpine silently pulled new minor+patch versions on node restart.
           image: redis:7.4-alpine
+          # CA-503: prevent spurious re-pulls on node restart when the image is already
+          # present. Matches the Helm Redis imagePullPolicy: IfNotPresent via values.yaml.
+          imagePullPolicy: IfNotPresent
           args:
             # MCP sessions are ephemeral; we don't need RDB/AOF persistence
             # to survive a Redis restart — the client will just re-initialize.

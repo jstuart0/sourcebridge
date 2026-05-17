@@ -229,13 +229,16 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      # CA-202 (wave 3) added a gRPC auth interceptor that requires the
-       # x-sb-worker-secret header on every call. The healthcheck probe must
-       # pass it too or the probe fails Unauthenticated and the container is
-       # marked unhealthy even when the worker is functionally serving.
+      # CA-515 / O-L3: delegate to the baked script which reads
+      # SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET and conditionally injects
+      # -rpc-header=x-sb-worker-secret:<secret> when the variable is set.
+      # SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET is aliased from
+      # SOURCEBRIDGE_GRPC_SECRET (see env block above) so this works
+      # out of the box without any operator env-var changes.
+      # Matches docker-compose.hub.yml:182-183 and the kustomize/Helm patterns.
       test:
         - CMD-SHELL
-        - /usr/local/bin/grpc_health_probe -addr=localhost:50051 -rpc-header=x-sb-worker-secret:${SOURCEBRIDGE_GRPC_SECRET:-dev-shared-secret}
+        - /usr/local/bin/sourcebridge-health-probe.sh
       interval: 5s
       timeout: 5s
       retries: 10
