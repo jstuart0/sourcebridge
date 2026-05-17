@@ -106,6 +106,120 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ## [Unreleased]
 
+### 2026-05-17 audit remediation 4th sweep (CA-493..CA-518)
+
+8 commits (`3c39c68c..1331b6a9`). 25 of 26 tickets closed. CA-506 transitioned to
+Deferred — observer wiring for runtime batch-size clamp is blocked by the
+`TestResolverStructureCanary` 4-field structural pin; test renamed to
+`TestEnrichAllRequirements_BatchSize200_AcceptedWithoutError`; clamp verified by code
+inspection.
+
+#### Security
+
+- **CA-493 / T-H1**: `GetSymbolCrossRepoRefs` in `internal/graph/filtered.go` replaced
+  the forbidden in-place filter `refs[:0:len(refs)]` with `make([]*CrossRepoRef, 0,
+  len(refs))`. The in-place pattern mutates MemStore backing slices, enabling cross-tenant
+  data corruption on any cache layer that returns live slices.
+  `TestTenantFilteredStoreGetSymbolCrossRepoRefs_DoesNotMutateInnerStore` pins the
+  regression gate.
+- **CA-497 / X-M1+D-M3**: `TestTenantFilteredStoreCanary_AllIDKeyedMethodsGated` updated
+  to cover 25 gated methods (8 federation + 16 ID-keyed + 1 cross-repo refs). `StoreAPIContract`
+  was correctly gated at `filtered.go:742` but absent from the canary — added. Cross-tenant
+  denial + same-tenant positive-path subtests added for `GetSymbolCrossRepoRefs`.
+  `TestFilteredVerifyLinkPermitted_CallsInnerStore` added via `filteredWithRecorder`.
+  Knowledge-tab accordion ARIA assertions extended to all 5 accordions (`ask` + `explore`
+  panels join existing `guide`/`execution`/`workflow`).
+
+#### Infrastructure / deployment
+
+- **CA-494 / O-H1**: Helm NetworkPolicy egress peers (5 sites) converted from
+  `podSelector`-only to single-list-item `podSelector` + `namespaceSelector`
+  AND-combinator shape. `podSelector`-only egress allowed any pod in any namespace
+  with the matching label to receive connections from sourcebridge pods on
+  multi-tenant clusters. Kustomize overlay `allow-worker-egress` SurrealDB peer
+  similarly fixed. Extends the May-16 CA-346/347/355 ingress fix to egress.
+- **CA-503 / O-M2**: `deploy/kubernetes/redis.yaml` gains `imagePullPolicy: IfNotPresent`.
+- **CA-514 / O-L2**: `allow-worker-egress` kustomize AND-combinator annotation added.
+- **CA-515 / O-L3**: Dev compose worker healthcheck converted from bare `grpc_health_probe`
+  to `CMD-SHELL` invoking `sourcebridge-health-probe.sh` (auth secret injection parity with hub-compose).
+
+#### UX / accessibility
+
+- **CA-495 / U-H1**: `--bg-subtle: var(--bg-surface-2)` token defined in both theme
+  blocks in `web/src/styles/tokens.css`. 34 components were rendering transparent
+  backgrounds because the token was referenced but never defined.
+- **CA-496 / U-H2**: `outline-none` replaced with explicit
+  `focus:outline focus:outline-2 focus:outline-[var(--accent-primary)] focus:outline-offset-2`
+  at 9 sites across `admin/comprehension/page.tsx` (6 sites) and
+  `admin/comprehension/models/page.tsx` (1 site) and `login/page.tsx` (2 sites).
+  Closes WCAG 2.4.7 failure on comprehension admin controls.
+- **CA-498 / U-M1**: `scope="col"` added to 19 `<th>` elements in comprehension admin
+  tables (`admin/comprehension/page.tsx`: 6; `admin/comprehension/models/page.tsx`: 13).
+- **CA-499 / U-M2**: Login password `<input>` elements migrated to design-system
+  `<Input>` component with programmatic label association.
+- **CA-500 / U-M3**: Search input gains accessible label and focus ring.
+- **CA-501 / U-M4**: Import textarea gains label, focus ring, and busy state
+  (`isImporting` state with `aria-busy`). `handleImportReqs` now uses try/finally
+  so `isImporting` resets on thrown errors.
+- **CA-509 / U-L1**: Requirement detail chat gains `aria-live="polite"` region for
+  incoming messages.
+- **CA-510 / U-L2**: Requirement detail page shows loading skeleton during initial
+  data fetch.
+- **CA-511 / U-L3**: ThemeToggle `aria-label` updated to describe current state
+  ("Switch to light mode" / "Switch to dark mode").
+- **CA-512 / U-L4**: `text-red-500` hardcoded color in requirement chat error path
+  replaced with `text-[var(--danger-text)]`.
+
+#### Tests
+
+- **CA-504 / D-M1**: New `cli/main_test.go` with `TestMain` resetting
+  `usage.ResetCountersForTest()` before `m.Run()`. Extends the CA-400 protocol
+  (already in `internal/api/graphql` and `internal/qa`) to the `cli` package.
+- **CA-506 / T-M1** — **Deferred**. Observer wiring for runtime batch-size clamp
+  blocked by `TestResolverStructureCanary` 4-field structural pin. Test renamed to
+  `TestEnrichAllRequirements_BatchSize200_AcceptedWithoutError`; clamp verified by
+  code inspection only. Follow-up ticket required.
+- **CA-507 / T-M2**: `TestOrchestrator_DisableWorkers` added — synchronous `GetByID`
+  read after enqueue asserts `status == pending` with `DisableWorkers: true`. No
+  sleep. Paired `DisableWorkers: false` test asserts job drains within 2s.
+- **CA-508 / T-L2**: `TestEnrichAllRequirements_ForceIncludesEnriched` upgraded to
+  real `orchestrator.New(...)` fixture with three-clause assertion
+  (`RequirementsQueued`, `JobID != "none"`, `JobID != ""`).
+
+#### Code health
+
+- **CA-502 / O-M1**: `oss-release.yml` now updates `values.yaml` image tag defaults
+  on tagged releases, preventing version desync with `Chart.yaml`.
+- **CA-505 / D-M2**: `internal/auth/local.go` gains unexported `localAdminEmail`
+  constant + exported `LocalAdminEmail()` accessor function. `internal/api/rest`
+  `localAuthUsername` constant is the OSS single-user rate-limit key;
+  `TestLocalAuthUsernameMatchesAuthPackageAccessor` (package `rest`) enforces cohesion
+  between the two.
+- **CA-513 / O-L1**: `Chart.yaml` maintainer URL updated.
+- **CA-516 / D-L1**: `secondsString` body replaced with `strconv.Itoa` + floor.
+  Incorrect "avoid importing strconv" comment deleted.
+- **CA-517 / D-L2**: CLAUDE.md Redis `readOnlyRootFilesystem` doc drift fixed — entry
+  now correctly records `false` (Redis writes RDB temp files to root FS before
+  atomic-rename; `true` would crash Redis on save).
+- **CA-518 / X-L2**: `loginBucket` gains `lastSeen time.Time` field updated on every
+  `Allow()` call. Lazy `sweep()` (every 256th call) deletes buckets only when
+  `len(attempts) == 0 AND time.Since(lastSeen) > window`, preventing unbounded map
+  growth in future multi-user deployments. `loginRateLimiter.now` field enables clock
+  injection for deterministic sweep tests.
+
+#### Known gaps / deferred
+
+- **CA-506 / T-M1** — Deferred per D-008(b). Runtime batch-boundary observation not
+  yet wired; clamp contract verified by code inspection. Follow-up ticket needed.
+- **codex r2 M3** — Admin/comprehension form controls (selects, numeric inputs, model
+  add form) still missing programmatic `htmlFor`/`id` label linkage. Follow-up ticket
+  needed.
+- **ruby Phase 4 R-L1** — Login password inputs missing `autoComplete` attributes.
+- **ruby Phase 4 R-L2** — `CommandPalette` `aria-label` redundant with library's
+  `<Command label>` prop.
+- **xander X-L1** — `GetRepoLink` absent from canary docstring's intentionally-ungated
+  enumeration.
+
 ### 2026-05-16 audit remediation campaign (CA-463..CA-489 subset)
 
 12 commits (`87724f18..d49eed59`). 27 of 30 audit findings closed. Three architectural
