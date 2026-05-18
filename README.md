@@ -12,6 +12,8 @@
 [![Release](https://img.shields.io/github/v/release/sourcebridge-ai/sourcebridge)](https://github.com/sourcebridge-ai/sourcebridge/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/sourcebridge/sourcebridge-api)](https://hub.docker.com/u/sourcebridge)
 
+**New here? [GETTING-STARTED.md](GETTING-STARTED.md) — 5-minute setup, step by step.**
+
 ## What is SourceBridge?
 
 SourceBridge is a requirement-aware code comprehension platform. Point it at any codebase and it generates field guides -- cliff notes, learning paths, code tours, architecture diagrams, and workflow stories -- so your team can understand how a system actually works. It also traces requirements to code, runs AI-powered reviews, and serves as an MCP server for AI agent integration.
@@ -59,146 +61,9 @@ Most tools help you search code. **SourceBridge helps you understand systems.**
 
 ## Quick Start
 
-### Docker Hub (fastest)
+See [GETTING-STARTED.md](GETTING-STARTED.md) for the complete 5-minute setup: secrets, LLM config, first repo, and first field guide.
 
-No git clone needed. Just pull and run:
-
-```bash
-# Download the compose file
-curl -O https://raw.githubusercontent.com/sourcebridge-ai/sourcebridge/main/docker-compose.hub.yml
-
-# Start SourceBridge (uses Ollama by default — no API key required)
-docker compose -f docker-compose.hub.yml up -d
-```
-
-Open [http://localhost:3300](http://localhost:3300) (you'll be directed to /login to create your admin account on the first-time setup form).
-
-> **Security: set your secrets before exposing SourceBridge to a network.**
->
-> The default compose files use sentinel values: `INSECURE-DEFAULT-CHANGE-ME-NOW`
-> for the database password and gRPC shared secret, and a publicly-known 64-hex
-> placeholder for the JWT signing key (CA-311: the old short fallback was
-> removed; the server now refuses to start with a JWT secret shorter than 32
-> bytes, but the 64-hex placeholder is syntactically valid). These are
-> intentionally loud and self-identifying — the API server will emit a repeating
-> warning until they are replaced. For production, prefer
-> `SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE` over the literal env var; see
-> `docs/going-to-production.md#jwt-secret` for the resolution chain.
->
-> Run the init script once before starting the stack:
->
-> ```bash
-> # Generates .env with strong random values (chmod 0600)
-> curl -O https://raw.githubusercontent.com/sourcebridge-ai/sourcebridge/main/scripts/init-hub-secrets.sh
-> chmod +x init-hub-secrets.sh && ./init-hub-secrets.sh
->
-> # Then start the stack — it picks up .env automatically
-> docker compose -f docker-compose.hub.yml up -d
-> ```
->
-> **Environment variables the init script sets:**
->
-> | Variable | Purpose |
-> |---|---|
-> | `SURREAL_PASS` | SurrealDB admin password (also controls `SURREAL_USER`, default `root`) |
-> | `SOURCEBRIDGE_GRPC_SECRET` | Shared secret between the API server and the AI worker |
-> | `SOURCEBRIDGE_JWT_SECRET` | JWT signing key for all user sessions |
->
-> To rotate secrets later, run `./init-hub-secrets.sh --force`.
-> All active sessions will be invalidated.
-
-> **Encryption key: auto-generated on first boot, persisted in a named volume.**
->
-> The `encryption-key-init` service in `docker-compose.hub.yml` generates a unique
-> 32-byte key on first boot and writes it to the `sourcebridge-secrets` named volume.
-> Subsequent `up` calls reuse the existing key — no environment variable setup needed
-> for encryption.
->
-> **`docker compose down -v` deletes both data and the encryption key**, which means
-> all stored API keys (saved through `/admin/llm`) are unrecoverable without the key.
-> Back up the `sourcebridge-secrets` volume before any `-v` teardown.
-> See [`docs/admin/llm-config.md`](docs/admin/llm-config.md#wipe-and-re-enter) for the
-> wipe-and-re-enter procedure when you need to start fresh.
-
-> **Using a cloud LLM?** Pass your provider config inline:
->
-> ```bash
-> SOURCEBRIDGE_LLM_PROVIDER=anthropic \
-> SOURCEBRIDGE_LLM_API_KEY=sk-ant-... \
-> SOURCEBRIDGE_LLM_MODEL=claude-sonnet-4-20250514 \
-> docker compose -f docker-compose.hub.yml up -d
-> ```
-
-<details>
-<summary><strong>Full configuration examples</strong></summary>
-
-#### Anthropic (recommended for quality)
-
-```bash
-SOURCEBRIDGE_LLM_PROVIDER=anthropic \
-SOURCEBRIDGE_LLM_API_KEY=sk-ant-api03-xxxxx \
-SOURCEBRIDGE_LLM_MODEL=claude-sonnet-4-20250514 \
-docker compose -f docker-compose.hub.yml up -d
-```
-
-#### OpenAI
-
-```bash
-SOURCEBRIDGE_LLM_PROVIDER=openai \
-SOURCEBRIDGE_LLM_API_KEY=sk-xxxxx \
-SOURCEBRIDGE_LLM_MODEL=gpt-4o \
-docker compose -f docker-compose.hub.yml up -d
-```
-
-#### Ollama (local, free)
-
-```bash
-# Install Ollama first: https://ollama.com
-ollama pull qwen3:32b
-
-# No API key needed — Ollama is the default
-docker compose -f docker-compose.hub.yml up -d
-```
-
-> **Quality gates**: Living Wiki evaluates generated pages against tier-aware thresholds.
-> `qwen3:32b` is classified as `TierLocal` automatically, which uses relaxed thresholds
-> appropriate for open-weight models. No configuration required for the default install.
-> To override the tier for a specific model, set it in **Admin → Comprehension → Model
-> Registry**. See [`docs/admin/llm-config.md`](docs/admin/llm-config.md#capability-tiers-and-quality-gates).
-
-#### OpenRouter (access to 100+ models)
-
-```bash
-SOURCEBRIDGE_LLM_PROVIDER=openrouter \
-SOURCEBRIDGE_LLM_API_KEY=sk-or-xxxxx \
-SOURCEBRIDGE_LLM_MODEL=anthropic/claude-sonnet-4-20250514 \
-docker compose -f docker-compose.hub.yml up -d
-```
-
-#### Production secrets
-
-Run `scripts/init-hub-secrets.sh` (recommended) to generate a `.env` with strong
-random values for `SURREAL_PASS`, `SOURCEBRIDGE_GRPC_SECRET`, and
-`SOURCEBRIDGE_JWT_SECRET`.  The compose file reads them automatically.
-
-```bash
-./scripts/init-hub-secrets.sh          # creates .env (chmod 0600)
-docker compose -f docker-compose.hub.yml up -d
-```
-
-Or set them inline without a `.env`:
-
-```bash
-SURREAL_PASS=$(openssl rand -hex 32) \
-SOURCEBRIDGE_JWT_SECRET=$(openssl rand -hex 32) \
-SOURCEBRIDGE_GRPC_SECRET=$(openssl rand -hex 32) \
-SOURCEBRIDGE_LLM_PROVIDER=anthropic \
-SOURCEBRIDGE_LLM_API_KEY=sk-ant-api03-xxxxx \
-SOURCEBRIDGE_LLM_MODEL=claude-sonnet-4-20250514 \
-docker compose -f docker-compose.hub.yml up -d
-```
-
-</details>
+For other install paths (Kubernetes, Helm, from source), see [docs/installation.md](docs/installation.md).
 
 ### Try the demo
 

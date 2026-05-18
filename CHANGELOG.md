@@ -22,6 +22,7 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Added
 
+* **docs:** `GETTING-STARTED.md` at repo root — linear, AI-friendly 5-minute setup guide covering Docker Hub compose path end-to-end. README Quick Start now points here. `docs/start-here.md` links back for pre-install visitors. Closes documentation gap where first-time users (and AI assistants) could not find a clean install path.
 * **install,web,api:** post-setup onboarding UX — `/repositories` empty-state CTA + `/admin/llm` env-seeded callout (CA-540, CA-542) ([74ddde33](https://github.com/sourcebridge-ai/sourcebridge/commit/74ddde3369702a532a372ec59e6b418ff1fe6691))
 
   * **CA-542 (F1)** (`web/src/app/(app)/repositories/page.tsx`): `/repositories` empty state surfaces a primary CTA "Configure your AI provider to get started" linking to `/admin/llm` when no active LLM profile with a provider is configured. Admin-only: the probe uses `isAdminRole(user?.role)` on the client to avoid 403 round-trips for non-admins; non-admins see the existing empty state unchanged. Flicker-free: `llmStatus` initializes to `{ configured: true, checked: false }` so the existing "No repositories indexed yet" empty state renders during the in-flight probe window; the CTA substitutes only when `checked === true && !configured`. On 403 or network error the fallback is the existing empty state.

@@ -1,5 +1,9 @@
 # Start Here
 
+Haven't installed SourceBridge yet? Start with [GETTING-STARTED.md](../GETTING-STARTED.md).
+
+---
+
 You just ran SourceBridge. Here's what happened and what to do next.
 
 ## What Just Happened
