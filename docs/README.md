@@ -15,7 +15,7 @@ Start here if you're trying SourceBridge for the first time.
 
 Learn how to use SourceBridge day-to-day.
 
-- **[Getting Started](user/getting-started.md)** — Full setup and first-use walkthrough
+- **[CLI Quickstart](user/cli-quickstart.md)** — CLI commands, indexing, and first-use walkthrough
 - **[CLI Reference](user/cli-reference.md)** — Command-line interface documentation
 - **[Web UI Guide](user/web-ui-guide.md)** — Dashboard features and navigation
 

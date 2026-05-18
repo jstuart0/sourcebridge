@@ -510,7 +510,7 @@ the API server during a rolling deploy, etc.).
 
 ## Documentation
 
-- [Getting Started](docs/user/getting-started.md)
+- [CLI Quickstart](docs/user/cli-quickstart.md)
 - [CLI Reference](docs/user/cli-reference.md)
 - [Web UI Guide](docs/user/web-ui-guide.md)
 - [Configuration](docs/admin/configuration.md)

@@ -53,6 +53,8 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Changed
 
+* **docs:** renamed `docs/user/getting-started.md` → `docs/user/cli-quickstart.md` to eliminate filename collision with the root `GETTING-STARTED.md`; updated cross-references in `README.md` and `docs/README.md`. Closes CA-543.
+* **docs:** rewrote `docs/start-here.md` to serve both demo-flow (`./demo.sh`) and fresh-install (Docker Compose / from source) users; was demo-centric with hard references to `acme-api`. Closes CA-544.
 * **ci:** bump 16 GHA actions to Node 24-compatible majors ahead of June 2, 2026 force-migration; golangci-lint tool v1.64.8 → v2.12.2 (CA-536) ([91738bf4](https://github.com/sourcebridge-ai/sourcebridge/commit/91738bf4))
 * **web:** define `--color-error`, `--color-accent`, `--color-primary`, `--color-info` token aliases in both theme blocks in `tokens.css` — closes ~55 undefined-token sites (CA-525) ([eb0bb6cf](https://github.com/sourcebridge-ai/sourcebridge/commit/eb0bb6cf))
 * **infra,docs:** kustomize README version example bumped to v0.15.1-rc.3; `oss-release.yml` extended to auto-bump README on tagged release; 2 CLAUDE.md test-name drift fixes; 3 stale TODO comments in `concurrency.py` resolved (CA-527, CA-528, CA-529, CA-530) ([27620612](https://github.com/sourcebridge-ai/sourcebridge/commit/27620612))

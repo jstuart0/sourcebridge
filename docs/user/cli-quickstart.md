@@ -1,4 +1,4 @@
-# Getting Started with SourceBridge.ai
+# CLI Quickstart
 
 SourceBridge.ai is a requirement-aware code comprehension platform that helps you trace requirements to code, run structured reviews, and understand codebases.
 
