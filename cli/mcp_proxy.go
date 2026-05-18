@@ -241,10 +241,11 @@ func (p *proxy) Run(ctx context.Context) error {
 	// Allow large messages — initialize results carry full capability sets.
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
+scanLoop:
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			break
+			break scanLoop
 		default:
 		}
 		line := scanner.Bytes()

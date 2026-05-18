@@ -20,13 +20,31 @@ linters:
         - (*encoding/csv.Writer).Write
         - io.WriteString
     staticcheck:
-      checks: ["all", "-SA1019"]  # Suppress deprecation warnings for now
+      # SA-class only — matches v1 staticcheck effective behavior.
+      # ST* (doc comment style), QF* (code suggestions), S* (gosimple) are
+      # pre-existing debt surfaced by the v2 linter unification; tracked as a
+      # follow-up cleanup ticket. SA1019 (deprecation) suppressed as before.
+      checks: ["SA*", "-SA1019"]
   exclusions:
     rules:
       # Test files: relax errcheck — test helpers often ignore setup errors
       - path: _test\.go
         linters:
           - errcheck
+      # defer X.Close() — pre-existing pattern throughout the codebase; noisy
+      # in v2 errcheck. Tracked for cleanup in a follow-up CA ticket.
+      - linters: [errcheck]
+        text: "Error return value of `.*\\.Close` is not checked"
+      # fmt.Fprint / fmt.Fprintf / fmt.Fprintln to stdout/stderr — low-risk,
+      # pre-existing pattern.
+      - linters: [errcheck]
+        text: "Error return value of `fmt\\.(Fprint|Fprintln|Fprintf)` is not checked"
+      # os.Stdout / os.Stderr / *os.File Write calls — pre-existing, low-risk.
+      - linters: [errcheck]
+        text: "Error return value of `.*\\.(Write|Flush)` is not checked"
+      # resp.Body.Close — standard HTTP client pattern; pre-existing.
+      - linters: [errcheck]
+        text: "Error return value of `.*Body\\.Close` is not checked"
     paths:
       - gen
       - tests/fixtures

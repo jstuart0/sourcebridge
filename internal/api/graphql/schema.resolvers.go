@@ -231,6 +231,7 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 	idx := indexer.NewIndexer(nil)
 	var result *indexer.IndexResult
 	var err error
+	var updatedRepo *graphstore.Repository
 
 	if len(previousHashes) > 0 {
 		result, err = idx.IndexRepositoryIncremental(ctx, localPath, previousHashes, previousFiles)
@@ -254,7 +255,7 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 	}
 
 	// Replace the stored data atomically
-	updatedRepo, err := r.getStore(ctx).ReplaceIndexResult(ctx, id, result)
+	_, err = r.getStore(ctx).ReplaceIndexResult(ctx, id, result)
 	if err != nil {
 		return nil, fmt.Errorf("replacing index result: %w", err)
 	}
