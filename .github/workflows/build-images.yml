@@ -62,7 +62,11 @@ jobs:
 
   build:
     needs: prepare
-    runs-on: ubuntu-latest
+    # F1: api and worker use QEMU cross-compilation on ubuntu-latest (amd64).
+    # web uses native per-platform runners (ubuntu-latest for amd64,
+    # ubuntu-24.04-arm for arm64) to avoid the multi-hour QEMU npm/Next.js
+    # build. The runner field is set per matrix entry.
+    runs-on: ${{ matrix.runner }}
     # CA-139: cosign keyless OIDC signing requires id-token: write at the
     # job level. The workflow-level permissions block above (contents:read,
     # packages:write) is otherwise unchanged; this block re-asserts it
@@ -76,24 +80,54 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # api + worker: QEMU cross-compile, both arches in one job.
+          # Completed in ~2.5min (worker) and ~17min (api) — acceptable.
           - name: api
             image: sourcebridge-api
             dockerfile: deploy/docker/Dockerfile.sourcebridge
             context: .
             edition: oss
             extra_build_args: ""
+            runner: ubuntu-latest
+            platforms: linux/amd64,linux/arm64
+            qemu: true
+            # api/worker push the full multi-arch manifest directly;
+            # no platform-suffix tags needed.
+            platform_suffix: ""
           - name: worker
             image: sourcebridge-worker
             dockerfile: deploy/docker/Dockerfile.worker
             context: .
             edition: oss
             extra_build_args: ""
-          - name: web
+            runner: ubuntu-latest
+            platforms: linux/amd64,linux/arm64
+            qemu: true
+            platform_suffix: ""
+          # web: split into two single-platform native builds to avoid
+          # QEMU npm/Next.js timeout (>1h observed). Each job pushes a
+          # platform-suffixed image (e.g. :main-amd64); the merge-web-manifest
+          # job below assembles the final multi-arch manifest list.
+          - name: web-amd64
             image: sourcebridge-web
             dockerfile: deploy/docker/Dockerfile.web
             context: .
             edition: oss
             extra_build_args: "NEXT_PUBLIC_EDITION=oss"
+            runner: ubuntu-latest
+            platforms: linux/amd64
+            qemu: false
+            platform_suffix: "-amd64"
+          - name: web-arm64
+            image: sourcebridge-web
+            dockerfile: deploy/docker/Dockerfile.web
+            context: .
+            edition: oss
+            extra_build_args: "NEXT_PUBLIC_EDITION=oss"
+            runner: ubuntu-24.04-arm
+            platforms: linux/arm64
+            qemu: false
+            platform_suffix: "-arm64"
 
     steps:
       - name: Checkout
@@ -102,10 +136,10 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      # F1 / O-M4: QEMU lets buildkit cross-compile linux/arm64 on the
-      # ubuntu-latest (amd64) runner. Must be registered before buildx is
-      # configured; one call covers all platforms for the entire job.
+      # F1 / O-M4: QEMU is only needed for api/worker (cross-compile amd64->arm64).
+      # web matrix entries build natively on their respective runners.
       - name: Set up QEMU
+        if: matrix.qemu == true
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
       - name: Set up Docker Buildx
@@ -132,7 +166,7 @@ jobs:
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@4907a6ddec9525e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
@@ -140,7 +174,7 @@ jobs:
 
       - name: Log in to Docker Hub
         if: steps.dockerhub.outputs.publish == 'true'
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@4907a6ddec9525e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -157,13 +191,16 @@ jobs:
           images: |
             ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_NAMESPACE }}/${{ matrix.image }}
             ${{ steps.dockerhub.outputs.publish == 'true' && format('docker.io/{0}/{1}', env.DOCKERHUB_NAMESPACE, matrix.image) || '' }}
+          # For web platform-split entries, append the platform suffix to every
+          # tag so the per-arch images don't collide before the manifest merge.
+          # For api/worker (platform_suffix=""), tags are the final tags.
           tags: |
-            type=sha,prefix=sha-,format=short
-            type=ref,event=branch
-            type=ref,event=pr
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
+            type=sha,prefix=sha-,format=short,suffix=${{ matrix.platform_suffix }}
+            type=ref,event=branch,suffix=${{ matrix.platform_suffix }}
+            type=ref,event=pr,suffix=${{ matrix.platform_suffix }}
+            type=raw,value=latest${{ matrix.platform_suffix }},enable={{is_default_branch}}
+            type=semver,pattern={{version}},suffix=${{ matrix.platform_suffix }}
+            type=raw,value=stable${{ matrix.platform_suffix }},enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
           # CA-136: pin the canonical OCI labels to the values from the
           # `prepare` job. metadata-action otherwise emits its own
           # version/revision/created based on github.ref / github.sha,
@@ -186,11 +223,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          # F1 / O-M4: arm64 added for Apple Silicon Mac users. QEMU cross-build
-          # runs on the same ubuntu-latest runner (~2-3× slower than native,
-          # acceptable for a release pipeline). Native arm64 runners are the
-          # fallback if a specific image's arm64 cross-build is unworkable.
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platforms }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -218,6 +251,9 @@ jobs:
       # Pinned by SHA so a malicious or accidental v4 retag can't change
       # what runs in our pipeline. Keep the human-readable tag in the comment
       # so future bumps are deliberate rather than mechanical.
+      #
+      # web-amd64 and web-arm64 are signed here (per platform-arch image);
+      # the merged web manifest is signed separately in merge-web-manifest.
       - name: Install cosign
         if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -247,3 +283,129 @@ jobs:
           DOCKERHUB_NAMESPACE: ${{ env.DOCKERHUB_NAMESPACE }}
           IMAGE: ${{ matrix.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
+
+  # F1 follow-up: merge the web-amd64 and web-arm64 single-platform images
+  # into a proper multi-arch manifest list. Runs after ALL build matrix jobs
+  # complete so both platform-suffixed images exist in the registry.
+  #
+  # This job assembles one manifest per tag variant by combining:
+  #   sourcebridge-web:<tag>-amd64  +  sourcebridge-web:<tag>-arm64
+  #   ->  sourcebridge-web:<tag>   (linux/amd64 + linux/arm64)
+  #
+  # api and worker are not handled here — they push a complete multi-arch
+  # manifest directly from their single QEMU matrix job.
+  merge-web-manifest:
+    needs: [prepare, build]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Detect Docker Hub publish target
+        id: dockerhub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          if [ -n "${DOCKERHUB_USERNAME}" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to GHCR
+        uses: docker/login-action@4907a6ddec9525e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: steps.dockerhub.outputs.publish == 'true'
+        uses: docker/login-action@4907a6ddec9525e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Compute the same tag set that the build jobs used, so we can map
+      # platform-suffixed -> final manifest tags consistently.
+      - name: Create multi-arch web manifest
+        env:
+          GHCR_IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_NAMESPACE }}/sourcebridge-web
+          DH_IMAGE: docker.io/${{ env.DOCKERHUB_NAMESPACE }}/sourcebridge-web
+          DH_PUBLISH: ${{ steps.dockerhub.outputs.publish }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          EVENT: ${{ github.event_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          HEAD_BRANCH: ${{ github.ref_name }}
+        run: |
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          IS_TAG=false
+          IS_STABLE=false
+          IS_DEFAULT=false
+          [[ "${GITHUB_REF}" == refs/tags/v* ]] && IS_TAG=true
+          [[ "${IS_TAG}" == "true" && "${GITHUB_REF}" != *-* ]] && IS_STABLE=true
+          [[ "${HEAD_BRANCH}" == "${DEFAULT_BRANCH}" ]] && IS_DEFAULT=true
+
+          TAGS="sha-${SHORT_SHA} ${HEAD_BRANCH}"
+          if [ "${IS_DEFAULT}" == "true" ]; then
+            TAGS="${TAGS} latest"
+          fi
+          if [ "${IS_TAG}" == "true" ]; then
+            TAGS="${TAGS} ${VERSION}"
+          fi
+          if [ "${IS_STABLE}" == "true" ]; then
+            TAGS="${TAGS} stable"
+          fi
+
+          echo "Tags to merge: ${TAGS}"
+
+          for tag in ${TAGS}; do
+            ghcr_amd64="${GHCR_IMAGE}:${tag}-amd64"
+            ghcr_arm64="${GHCR_IMAGE}:${tag}-arm64"
+            ghcr_dst="${GHCR_IMAGE}:${tag}"
+            echo "Merging ${ghcr_amd64} + ${ghcr_arm64} -> ${ghcr_dst}"
+            docker buildx imagetools create -t "${ghcr_dst}" "${ghcr_amd64}" "${ghcr_arm64}"
+            if [ "${DH_PUBLISH}" == "true" ]; then
+              dh_amd64="${DH_IMAGE}:${tag}-amd64"
+              dh_arm64="${DH_IMAGE}:${tag}-arm64"
+              dh_dst="${DH_IMAGE}:${tag}"
+              echo "Merging ${dh_amd64} + ${dh_arm64} -> ${dh_dst}"
+              docker buildx imagetools create -t "${dh_dst}" "${dh_amd64}" "${dh_arm64}"
+            fi
+          done
+
+      # Sign the final merged GHCR manifest by digest.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign merged GHCR web manifest (keyless)
+        env:
+          GHCR_IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_NAMESPACE }}/sourcebridge-web
+          GITHUB_SHA: ${{ github.sha }}
+          HEAD_BRANCH: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          # Sign the branch tag (stable reference for the merged manifest)
+          REF_TAG="${HEAD_BRANCH}"
+          DIGEST=$(docker buildx imagetools inspect "${GHCR_IMAGE}:${REF_TAG}" --format '{{.Manifest.Digest}}')
+          echo "Signing ${GHCR_IMAGE}@${DIGEST}"
+          cosign sign --yes "${GHCR_IMAGE}@${DIGEST}"
+
+      - name: Sign merged Docker Hub web manifest (keyless)
+        if: steps.dockerhub.outputs.publish == 'true'
+        env:
+          DH_IMAGE: docker.io/${{ env.DOCKERHUB_NAMESPACE }}/sourcebridge-web
+          HEAD_BRANCH: ${{ github.ref_name }}
+        run: |
+          REF_TAG="${HEAD_BRANCH}"
+          DIGEST=$(docker buildx imagetools inspect "${DH_IMAGE}:${REF_TAG}" --format '{{.Manifest.Digest}}')
+          echo "Signing ${DH_IMAGE}@${DIGEST}"
+          cosign sign --yes "${DH_IMAGE}@${DIGEST}"
