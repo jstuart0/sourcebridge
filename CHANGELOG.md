@@ -20,6 +20,15 @@ All notable changes to SourceBridge are documented here. The format follows
 ## [Unreleased]
 
 
+### Added
+
+* **install,web,api:** post-setup onboarding UX — `/repositories` empty-state CTA + `/admin/llm` env-seeded callout (CA-540, CA-542) ([74ddde33](https://github.com/sourcebridge-ai/sourcebridge/commit/74ddde3369702a532a372ec59e6b418ff1fe6691))
+
+  * **CA-542 (F1)** (`web/src/app/(app)/repositories/page.tsx`): `/repositories` empty state surfaces a primary CTA "Configure your AI provider to get started" linking to `/admin/llm` when no active LLM profile with a provider is configured. Admin-only: the probe uses `isAdminRole(user?.role)` on the client to avoid 403 round-trips for non-admins; non-admins see the existing empty state unchanged. Flicker-free: `llmStatus` initializes to `{ configured: true, checked: false }` so the existing "No repositories indexed yet" empty state renders during the in-flight probe window; the CTA substitutes only when `checked === true && !configured`. On 403 or network error the fallback is the existing empty state.
+
+  * **CA-540 (F2)** (`web/src/app/(app)/admin/llm/page.tsx`, `internal/db/`, `internal/api/rest/llm_profiles.go`, `cli/serve.go`): `/admin/llm` shows an informational callout when the active profile was auto-configured at startup from environment variables. Includes the model name (ask_model first, falls back to summary_model, then "(unset)") and a masked key fingerprint (`api_key_hint`); the fingerprint line is omitted for keyless providers (Ollama). Callout positioned below the existing State 1/2/3 actionable-warning banners so actionable warnings lead the attention hierarchy. Backend adds a `created_via` column on `ca_llm_profile` (migration 060) with three values: `"env_bootstrap"` (env-seeded fresh install), `"legacy_migration"` (migrated from `ca_llm_config:default`), or `""` (admin-UI-created / unknown). Wire-additive: `ProfileResponse.created_via` uses `json:"created_via,omitempty"` so older clients ignore it.
+
+
 ### Fixed
 
 * **web,docs,infra:** three first-install rough edges closed — CSP dev `unsafe-eval` gate, `/setup` 404 redirect, AI key env-var wiring + cloud-provider doc correction (CA-537, CA-538, CA-539) ([17a386c9](https://github.com/sourcebridge-ai/sourcebridge/commit/17a386c9))
@@ -30,9 +39,9 @@ All notable changes to SourceBridge are documented here. The format follows
 
   * **CA-539** (`Makefile`, `docs/installation.md`, `README.md`): `dev-go` and `dev-worker` Makefile targets now bridge `ANTHROPIC_API_KEY` → `SOURCEBRIDGE_LLM_API_KEY` / `SOURCEBRIDGE_WORKER_LLM_API_KEY` when the canonical vars are unset (canonical always wins). Cloud-provider rows in `docs/installation.md` (Anthropic, OpenAI) and `README.md` (Anthropic, OpenAI, Google Gemini, OpenRouter) corrected to show the canonical `SOURCEBRIDGE_WORKER_LLM_API_KEY`; only the Anthropic row carries the Makefile-bridge parenthetical.
 
-  **Follow-ups** (not in this fix; separate tickets):
-  - `/repositories` empty-state should surface a CTA to `/admin/llm` when no LLM profile is active (ruby HIGH — CA-540 or equivalent)
-  - `/admin/llm` should show a callout when a profile was auto-configured from the env seed (ruby MEDIUM)
+  **Follow-ups**:
+  - ~~`/repositories` empty-state should surface a CTA to `/admin/llm` when no LLM profile is active (ruby HIGH — CA-542)~~ → closed by CA-542 (2026-05-18)
+  - ~~`/admin/llm` should show a callout when a profile was auto-configured from the env seed (ruby MEDIUM — CA-540)~~ → closed by CA-540 (2026-05-18)
   - `setup.sh` existence is confirmed at repo root; no action needed unless a future audit finds it missing (bob L2)
 
 * **ci:** golangci-lint v2 config migration + oss-release pull-rebase ordering before edits (CA-536, codex r2) ([4ad027dc](https://github.com/sourcebridge-ai/sourcebridge/commit/4ad027dc))
