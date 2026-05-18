@@ -174,7 +174,7 @@ export function ProfileNamePill({
           maxLength={64}
           aria-label="Profile name"
           data-testid={`${testIdPrefix}-input`}
-          className="h-7 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-2 text-xs text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-primary,#3b82f6)]"
+          className="h-7 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-2 text-xs text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-focus)]"
         />
       </label>
       <Button

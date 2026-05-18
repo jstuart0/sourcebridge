@@ -76,6 +76,15 @@
 
   /* CA-495: semantic alias — resolves automatically per theme */
   --bg-subtle: var(--bg-surface-2);
+
+  /* CA-525: compatibility aliases for legacy --color-* tokens referenced via
+     var(--color-X, #hex) fallbacks at ~56 call sites. Forwarding to canonical
+     token families so theme adaptation works; hardcoded fallbacks were silently
+     bypassing dark-mode contrast tuning. */
+  --color-error: var(--danger-text);
+  --color-accent: var(--accent-primary);
+  --color-primary: var(--accent-primary);
+  --color-info: var(--accent-primary);
 }
 
 :root[data-theme="light"],
@@ -117,6 +126,15 @@
 
   /* CA-495: semantic alias — resolves automatically per theme */
   --bg-subtle: var(--bg-surface-2);
+
+  /* CA-525: compatibility aliases for legacy --color-* tokens referenced via
+     var(--color-X, #hex) fallbacks at ~56 call sites. Forwarding to canonical
+     token families so theme adaptation works; hardcoded fallbacks were silently
+     bypassing dark-mode contrast tuning. */
+  --color-error: var(--danger-text);
+  --color-accent: var(--accent-primary);
+  --color-primary: var(--accent-primary);
+  --color-info: var(--accent-primary);
 }
 
 :root {
