@@ -103,6 +103,8 @@ export function TraceabilityMatrix({
                     >
                       {link && (
                         <div
+                          role="img"
+                          aria-label={`${link.confidence}${link.verified ? ", verified" : ""}`}
                           className={cn(
                             "mx-auto h-3 w-3 rounded-full",
                             confidenceClasses[link.confidence] || confidenceClasses.LOW,

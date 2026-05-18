@@ -791,7 +791,7 @@ function ActiveJobCard({
           </p>
           <p className="truncate text-xs text-[var(--text-secondary)]">{job.subsystem}</p>
         </div>
-        <span className={cn("mt-1 inline-block h-2.5 w-2.5 rounded-full", statusDot(job.status))} />
+        <span aria-hidden="true" className={cn("mt-1 inline-block h-2.5 w-2.5 rounded-full", statusDot(job.status))} />
       </div>
 
       <JobProgress job={job} variant="card" />
@@ -870,6 +870,7 @@ function RecentHistoryTable({
               <td className="py-3 pr-3">
                 <span className="flex items-center gap-2">
                   <span
+                    aria-hidden="true"
                     className={cn(
                       "inline-block h-2 w-2 rounded-full",
                       statusDot(job.status)
@@ -962,7 +963,7 @@ function JobDetailDrawer({ job, onClose }: { job: JobView; onClose: () => void }
         <section className="space-y-1">
           <p className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">How it went</p>
           <div className="flex items-center gap-2">
-            <span className={cn("inline-block h-2.5 w-2.5 rounded-full", statusDot(job.status))} />
+            <span aria-hidden="true" className={cn("inline-block h-2.5 w-2.5 rounded-full", statusDot(job.status))} />
             <span className="text-sm font-medium uppercase tracking-wide text-[var(--text-primary)]">
               {job.status}
             </span>

@@ -472,6 +472,7 @@ export function SymbolsTab({
             value={symbolQuery}
             onChange={(e) => setSymbolQuery(e.target.value)}
             placeholder="Search symbols..."
+            aria-label="Search symbols"
             className="min-w-0 flex-1"
           />
           <div className="flex shrink-0 gap-1 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] p-1">
@@ -741,6 +742,7 @@ export function SymbolsTab({
                             }
                           }}
                           placeholder={selectedSymbolNode ? `Ask about ${selectedSymbolNode.name}...` : "Ask about this file..."}
+                          aria-label={selectedSymbolNode ? `Ask about ${selectedSymbolNode.name}` : "Ask about this file"}
                           className="flex-1"
                         />
                         <Button onClick={handleScopedFollowUp} disabled={knowledgeLoading || !symbolChatQuestion.trim()}>

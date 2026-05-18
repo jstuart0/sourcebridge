@@ -138,6 +138,7 @@ export function RepoJobsPopover({ repoId }: { repoId: string }) {
         className="inline-flex items-center gap-2 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
       >
         <span
+          aria-hidden="true"
           className={cn(
             "inline-block h-2 w-2 rounded-full",
             activeCount > 0 ? "bg-blue-500 animate-pulse" : "bg-gray-400"
@@ -242,6 +243,7 @@ export function RepoJobsPopover({ repoId }: { repoId: string }) {
                   className="flex items-start gap-2 rounded-[var(--radius-sm)] px-1 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)]"
                 >
                   <span
+                    aria-hidden="true"
                     className={cn(
                       "mt-[5px] inline-block h-2 w-2 shrink-0 rounded-full",
                       statusColor(job.status)
