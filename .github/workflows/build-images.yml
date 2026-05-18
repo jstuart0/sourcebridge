@@ -106,7 +106,7 @@ jobs:
       # ubuntu-latest (amd64) runner. Must be registered before buildx is
       # configured; one call covers all platforms for the entire job.
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff9f9f97aef428bf8f5 # v3.6.0
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
