@@ -214,7 +214,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      # F10: use 127.0.0.1 (not localhost) — Alpine's musl resolves
+      # localhost to IPv6 first, but Next.js only listens on IPv4.
+      # Otherwise the container reports "unhealthy" despite serving.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000"]
       interval: 10s
       timeout: 3s
       retries: 5
