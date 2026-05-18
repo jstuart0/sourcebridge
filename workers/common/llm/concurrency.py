@@ -31,8 +31,8 @@ Kill switch: SOURCEBRIDGE_LLM_CONCURRENCY_WRAPPER_ENABLED=false reverts to
 pre-refactor behavior without redeploy.
 
 The aggregator task (emitting ``llm_provider_gate_metrics`` log lines) is
-deferred to Phase 6; the start hook is a placeholder comment here.
-# TODO(phase-6): start aggregator task in ProviderGateRegistry.__init__
+a future extension point; ``ProviderGateRegistry.__init__`` is the
+appropriate wiring site when implemented.
 
 See plan: thoughts/shared/plans/active-2026-05-06-deliver-worker-llm-concurrency.md
 """
@@ -960,10 +960,10 @@ class ConcurrencyGatedProvider:
     Phase 3: tenacity predicate activated (Decision 4 whitelist), aiolimiter
     wired for RPM shaping when configured.
 
-    ``stream()`` is pass-through (no usage extraction).
-    Provider-specific streaming subclasses (``OpenAICompatGatedProvider``,
-    ``AnthropicGatedProvider``) that extract final usage tokens are added in
-    Phase 6.  A ``# TODO(phase-6)`` comment marks the extension point.
+    ``stream()`` is pass-through (no usage extraction).  Provider-specific
+    streaming subclasses (``OpenAICompatGatedProvider``,
+    ``AnthropicGatedProvider``) that extract final usage tokens for the tok/s
+    ring-buffer are a future extension; ``stream()`` is the wiring site.
     """
 
     def __init__(
@@ -1042,11 +1042,10 @@ class ConcurrencyGatedProvider:
     ) -> AsyncIterator[str]:
         """Pass-through streaming (slot held during the entire stream).
 
-        TODO(phase-6): replace with provider-specific subclasses
-        (``OpenAICompatGatedProvider``, ``AnthropicGatedProvider``) that
-        call the SDK directly and extract the final usage chunk for tok/s
-        ring-buffer recording.  Until Phase 6, this wrapper simply acquires
-        the slot, delegates to ``raw.stream``, and releases on completion.
+        Acquires the gate slot, delegates to ``raw.stream``, and releases on
+        completion.  Provider-specific subclasses (``OpenAICompatGatedProvider``,
+        ``AnthropicGatedProvider``) that extract the final usage chunk for tok/s
+        ring-buffer recording are a future extension of this method.
         """
         retry_max = self._config.retry_max_attempts
 

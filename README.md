@@ -255,16 +255,16 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - github.com/sourcebridge-ai/sourcebridge//deploy/kubernetes/base?ref=v0.14.0-rc.3
+  - github.com/sourcebridge-ai/sourcebridge//deploy/kubernetes/base?ref=v0.15.1-rc.3
 
 # Pin image tags (replace pin-via-overlay-do-not-use placeholder)
 images:
   - name: ghcr.io/sourcebridge-ai/sourcebridge-api
-    newTag: v0.14.0-rc.3
+    newTag: v0.15.1-rc.3
   - name: ghcr.io/sourcebridge-ai/sourcebridge-worker
-    newTag: v0.14.0-rc.3
+    newTag: v0.15.1-rc.3
   - name: ghcr.io/sourcebridge-ai/sourcebridge-web
-    newTag: v0.14.0-rc.3
+    newTag: v0.15.1-rc.3
 
 patches:
   # Set the Ingress hostname and NEXT_PUBLIC_API_URL together.
