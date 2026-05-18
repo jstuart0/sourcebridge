@@ -24,6 +24,9 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-18 multi-arch Docker images: linux/arm64 added to build-images.yml (F1, O-M4)** — 1 commit, `TBD`.
+Adds QEMU cross-platform support to `.github/workflows/build-images.yml` so all three component images (`sourcebridge-{api,worker,web}`) are published with `linux/amd64,linux/arm64` manifest lists. Closes the install-blocker for Apple Silicon Mac users (previously `docker compose pull` failed with "no matching manifest for linux/arm64/v8"). O-M4 from the 2026-05-09 audit-remediation wave 3 campaign is now closed. `oss-release.yml`'s separate `build-docker` job (combined all-in-one image) is still amd64-only; tracked as a follow-up.
+
 **2026-05-18 post-setup onboarding UX: `/repositories` empty-state CTA + `/admin/llm` env-seeded callout (CA-540, CA-542)** — 1 commit, `74ddde33`.
 Two follow-up UX fixes deferred from the 2026-05-17 first-install rough-edges campaign. CA-542 (F1): `/repositories` empty state now surfaces a primary CTA "Configure your AI provider to get started" linking to `/admin/llm` when no active LLM profile with a provider is configured. Admin-only (`isAdminRole(user?.role)` client-side gate); non-admins see the existing empty state. Flicker-free: `llmStatus` initializes `{ configured: true, checked: false }` so the existing empty state renders during the probe window. CA-540 (F2): `/admin/llm` shows an informational callout when the active profile was auto-configured at startup from environment variables; includes model name and masked API key fingerprint; callout is positioned below the existing State 1/2/3 banners. Backend adds `created_via` column on `ca_llm_profile` (migration 060) with three values: `"env_bootstrap"` / `"legacy_migration"` / `""`. `ProfileResponse.CreatedVia` exposed with `json:"created_via,omitempty"` (wire-additive).
 

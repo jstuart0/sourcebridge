@@ -102,6 +102,12 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      # F1 / O-M4: QEMU lets buildkit cross-compile linux/arm64 on the
+      # ubuntu-latest (amd64) runner. Must be registered before buildx is
+      # configured; one call covers all platforms for the entire job.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff9f9f97aef428bf8f5 # v3.6.0
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
@@ -180,7 +186,11 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64
+          # F1 / O-M4: arm64 added for Apple Silicon Mac users. QEMU cross-build
+          # runs on the same ubuntu-latest runner (~2-3× slower than native,
+          # acceptable for a release pipeline). Native arm64 runners are the
+          # fallback if a specific image's arm64 cross-build is unworkable.
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
