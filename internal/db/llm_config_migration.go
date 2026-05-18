@@ -159,7 +159,17 @@ func MigrateToProfiles(
 		// Atomic across: workspace version bump, active_profile_id
 		// pointer publication, ca_llm_profile:default-migrated UPSERT,
 		// watermark assignment.
-		err = runMigrationBatch(ctx, surrealDB, observedLegacyVersion, hasLegacy, legacy, apiKeyForProfile)
+		//
+		// createdViaLabel is computed per-attempt (inside the retry loop) so
+		// that a second attempt taking the self-heal path sees the correct
+		// freshInstall value for THAT iteration (R6 — avoids stale label).
+		createdViaLabel := ""
+		if freshInstall && (envBoot.APIKey != "" || envBoot.Provider != "") {
+			createdViaLabel = "env_bootstrap"
+		} else if !freshInstall {
+			createdViaLabel = "legacy_migration"
+		}
+		err = runMigrationBatch(ctx, surrealDB, observedLegacyVersion, hasLegacy, legacy, apiKeyForProfile, createdViaLabel)
 		if errors.Is(err, ErrLegacyChanged) {
 			slog.Warn("llm profile migration: legacy row changed mid-migration; retrying from step 1",
 				"observed_legacy_version", observedLegacyVersion,
@@ -186,6 +196,11 @@ func MigrateToProfiles(
 // guard is on `existing.version == observed_legacy_version` — if an
 // old pod committed a SaveLLMConfig between step 2's read and this
 // batch, the THROW signals the caller to retry (codex-r1d-NEW).
+//
+// createdViaLabel records the provenance of the profile row:
+//   "env_bootstrap"    — fresh install seeded from env vars
+//   "legacy_migration" — migrated from a ca_llm_config:default row
+//   ""                 — fresh install with no env vars configured
 func runMigrationBatch(
 	ctx context.Context,
 	surrealDB *SurrealDB,
@@ -193,6 +208,7 @@ func runMigrationBatch(
 	hasLegacy bool,
 	legacy LegacyFields,
 	apiKeyForProfile string,
+	createdViaLabel string,
 ) error {
 	db := surrealDB.DB()
 	if db == nil {
@@ -230,7 +246,8 @@ func runMigrationBatch(
 			advanced_mode                = $legacy_advanced_mode,
 			created_at                   = (IF created_at != NONE THEN created_at ELSE type::datetime($now) END),
 			updated_at                   = type::datetime($now),
-			last_legacy_version_consumed = $new_version;
+			last_legacy_version_consumed = $new_version,
+			created_via                  = $created_via_value;
 		UPSERT ca_llm_config:default SET
 			active_profile_id          = $migrated_full_id,
 			version                    = $new_version,
@@ -266,6 +283,7 @@ func runMigrationBatch(
 		"legacy_draft_model":                legacy.DraftModel,
 		"legacy_timeout_secs":               legacy.TimeoutSecs,
 		"legacy_advanced_mode":              legacy.AdvancedMode,
+		"created_via_value":                 createdViaLabel,
 	}
 	raw, err := surrealdb.Query[interface{}](ctx, db, sql, vars)
 	if err != nil {

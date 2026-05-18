@@ -1739,6 +1739,7 @@ func profileToResponse(p db.Profile, activeID string) rest.ProfileResponse {
 		CreatedAt:                rest.FormatProfileTime(p.CreatedAt),
 		UpdatedAt:                rest.FormatProfileTime(p.UpdatedAt),
 		MaxConcurrentCalls:       p.MaxConcurrentCalls,
+		CreatedVia:               p.CreatedVia,
 	}
 }
 

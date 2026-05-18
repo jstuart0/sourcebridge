@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronRight, FileText, FolderPlus, Info, Trash2, Upload } from "lucide-react";
 import { useMutation, useQuery } from "urql";
@@ -23,6 +23,8 @@ import { Panel } from "@/components/ui/panel";
 import { Textarea } from "@/components/ui/textarea";
 import { LazyScoreBadge } from "@/components/understanding-score";
 import { trackEvent } from "@/lib/telemetry";
+import { authFetch } from "@/lib/auth-fetch";
+import { useCurrentUser, isAdminRole } from "@/lib/current-user";
 
 interface Repository {
   id: string;
@@ -77,11 +79,59 @@ function statusTooltip(status: string): string {
 
 export default function RepositoriesPage() {
   const router = useRouter();
+  const user = useCurrentUser();
   const [result, reexecute] = useQuery({ query: REPOSITORIES });
   const [lwResult] = useQuery({ query: LIVING_WIKI_GLOBAL_SETTINGS_QUERY });
   const [, importReqs] = useMutation(IMPORT_REQUIREMENTS);
   const [, addRepo] = useMutation(ADD_REPOSITORY_MUTATION);
   const [, removeRepo] = useMutation(REMOVE_REPOSITORY_MUTATION);
+
+  // CA-542 / F1 — LLM-profile probe.
+  // Initialize optimistic (configured: true, checked: false) so the existing
+  // empty state renders during the probe window without any flicker or skeleton
+  // (ruby H1 — Decision 4). The new "Configure AI provider" CTA only appears
+  // when checked === true AND configured === false AND the user is an admin.
+  const [llmStatus, setLlmStatus] = useState<{ configured: boolean; checked: boolean }>(
+    { configured: true, checked: false }
+  );
+
+  useEffect(() => {
+    // Non-admin users can't act on the CTA, so skip the fetch entirely to
+    // avoid a 403 round-trip. The isAdminRole default is true (OSS single-user),
+    // so the probe fires on every fresh install.
+    if (!isAdminRole(user?.role)) {
+      return;
+    }
+    let cancelled = false;
+    authFetch("/api/v1/admin/llm-profiles")
+      .then(async (res) => {
+        if (cancelled) return;
+        if (!res.ok) {
+          // 403 (non-admin on enterprise) or other error: fall back to existing
+          // empty state (don't surface CTA the user can't act on).
+          setLlmStatus({ configured: true, checked: true });
+          return;
+        }
+        const data = await res.json() as {
+          profiles: { is_active: boolean; provider: string }[];
+          active_profile_missing: boolean;
+        };
+        if (cancelled) return;
+        // configured = active profile exists with a non-empty provider.
+        // active_profile_missing=true also counts as "not configured".
+        const configured =
+          !data.active_profile_missing &&
+          data.profiles.some((p) => p.is_active && p.provider !== "");
+        setLlmStatus({ configured, checked: true });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Network error: fall back to existing empty state.
+        setLlmStatus({ configured: true, checked: true });
+      });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [importPath, setImportPath] = useState("");
   const [importRepoId, setImportRepoId] = useState<string | null>(null);
@@ -405,11 +455,31 @@ export default function RepositoriesPage() {
           ))}
         </div>
       ) : repos.length === 0 && !result.fetching ? (
-        <EmptyState
-          title="No repositories indexed yet"
-          description="Start by adding a repository. Once indexing completes, SourceBridge.ai builds a cliff notes for the system: files, symbols, structure, and guided understanding."
-          actions={<Button onClick={() => setShowAddForm(true)}>Add Repository</Button>}
-        />
+        // CA-542 / F1: when the LLM probe has settled and the active profile
+        // has no provider configured, surface a "Configure AI provider" CTA
+        // instead of the usual "Add Repository" empty state. This guides fresh
+        // installers who land here before setting up an LLM.
+        // - checked === false: probe still in flight → render existing empty state
+        //   (Decision 4 / ruby H1 — no skeleton, no double-flicker).
+        // - checked === true && configured: existing empty state (LLM is ready).
+        // - checked === true && !configured && admin: new CTA.
+        llmStatus.checked && !llmStatus.configured && isAdminRole(user?.role) ? (
+          <EmptyState
+            title="Configure your AI provider to get started"
+            description="SourceBridge uses an LLM to comprehend, link, and answer questions about your code."
+            actions={
+              <Button onClick={() => router.push("/admin/llm")}>
+                Configure AI provider
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            title="No repositories indexed yet"
+            description="Start by adding a repository. Once indexing completes, SourceBridge.ai builds a cliff notes for the system: files, symbols, structure, and guided understanding."
+            actions={<Button onClick={() => setShowAddForm(true)}>Add Repository</Button>}
+          />
+        )
       ) : (
         <div className="grid gap-5">
           {repos.map((repo) => (

@@ -36,6 +36,14 @@ export interface ProfileResponse {
   is_active: boolean;
   created_at?: string;
   updated_at?: string;
+  /**
+   * Provenance of the profile row:
+   *   "env_bootstrap"    — seeded at startup from SOURCEBRIDGE_LLM_* env vars
+   *   "legacy_migration" — migrated from a ca_llm_config:default row
+   *   ""                 — created via admin UI (or omitted by older API replicas)
+   * Optional: older API replicas during a rolling deploy may omit this field.
+   */
+  created_via?: string;
 }
 
 /**

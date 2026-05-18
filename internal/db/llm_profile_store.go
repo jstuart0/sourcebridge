@@ -142,6 +142,11 @@ type Profile struct {
 	// Capped at 256 at the DB level (ASSERT) and at the Go-side adapter
 	// (D9 hard ceiling).
 	MaxConcurrentCalls *int
+	// CreatedVia records the provenance of this profile row:
+	//   "env_bootstrap"     — seeded at startup from SOURCEBRIDGE_LLM_* env vars
+	//   "legacy_migration"  — migrated forward from a ca_llm_config:default row
+	//   ""                  — created via admin UI (schema default)
+	CreatedVia string
 }
 
 // ProfileCreate is the input shape for CreateProfile. APIKey is plaintext
@@ -258,6 +263,7 @@ func (s *SurrealLLMProfileStore) EnsureSchema(ctx context.Context) error {
 		DEFINE FIELD IF NOT EXISTS last_legacy_version_consumed ON ca_llm_profile TYPE int DEFAULT 0;
 		DEFINE FIELD IF NOT EXISTS max_concurrent_calls ON ca_llm_profile TYPE option<int>
 		  ASSERT $value IS NONE OR ($value >= 0 AND $value <= 256);
+		DEFINE FIELD IF NOT EXISTS created_via ON ca_llm_profile TYPE string DEFAULT '';
 		DEFINE INDEX IF NOT EXISTS ca_llm_profile_name_key_unique ON ca_llm_profile FIELDS name_key UNIQUE;
 	`, map[string]any{})
 	if err != nil {
@@ -337,6 +343,7 @@ func (s *SurrealLLMProfileStore) rowToProfile(row map[string]interface{}) (*Prof
 		iv := coerceInt(v)
 		p.MaxConcurrentCalls = &iv
 	}
+	p.CreatedVia = strVal(row, "created_via")
 	return p, nil
 }
 
@@ -436,7 +443,7 @@ func (s *SurrealLLMProfileStore) ListProfiles(ctx context.Context) ([]Profile, e
 			summary_model, review_model, ask_model, knowledge_model,
 			architecture_diagram_model, report_model, draft_model,
 			timeout_secs, advanced_mode, created_at, updated_at,
-			last_legacy_version_consumed, max_concurrent_calls
+			last_legacy_version_consumed, max_concurrent_calls, created_via
 		 FROM ca_llm_profile ORDER BY name_key ASC`,
 		map[string]any{})
 	if err != nil {
@@ -482,7 +489,7 @@ func (s *SurrealLLMProfileStore) LoadProfile(ctx context.Context, id string) (*P
 			summary_model, review_model, ask_model, knowledge_model,
 			architecture_diagram_model, report_model, draft_model,
 			timeout_secs, advanced_mode, created_at, updated_at,
-			last_legacy_version_consumed, max_concurrent_calls
+			last_legacy_version_consumed, max_concurrent_calls, created_via
 		 FROM ca_llm_profile WHERE id = type::thing('ca_llm_profile', $rid) LIMIT 1`,
 		map[string]any{"rid": recordID})
 	if err != nil {

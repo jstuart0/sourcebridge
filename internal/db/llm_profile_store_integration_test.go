@@ -1030,3 +1030,86 @@ func TestIntegration_WriteActiveByID_DetectsMissingProfile(t *testing.T) {
 		t.Errorf("legacy variant w/ missing profile: got %v, want ErrProfileNotFound", err)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// created_via column (CA-540)
+// ─────────────────────────────────────────────────────────────────────────
+
+func TestIntegration_MigrateToProfiles_FreshInstallWithEnvBootstrap_SetsCreatedViaEnvBootstrap(t *testing.T) {
+	hs := newHelperStores(t, "test-key", false)
+	ctx := context.Background()
+	// Fresh install: no legacy row, env vars provide provider + key.
+	envBoot := config.LLMConfig{
+		Provider: "anthropic",
+		APIKey:   "sk-test-key",
+	}
+	if err := MigrateToProfiles(ctx, hs.surreal, hs.lcs, hs.lps, hs.cipher, false, envBoot); err != nil {
+		t.Fatalf("MigrateToProfiles: %v", err)
+	}
+	p, err := hs.lps.LoadProfile(ctx, MigratedProfileRecordID)
+	if err != nil {
+		t.Fatalf("LoadProfile: %v", err)
+	}
+	if p.CreatedVia != "env_bootstrap" {
+		t.Errorf("created_via: got %q, want %q", p.CreatedVia, "env_bootstrap")
+	}
+}
+
+func TestIntegration_MigrateToProfiles_FreshInstallNoEnv_LeavesCreatedViaEmpty(t *testing.T) {
+	hs := newHelperStores(t, "test-key", false)
+	ctx := context.Background()
+	// Fresh install: no legacy row, no env vars — empty config.
+	if err := MigrateToProfiles(ctx, hs.surreal, hs.lcs, hs.lps, hs.cipher, false, config.LLMConfig{}); err != nil {
+		t.Fatalf("MigrateToProfiles: %v", err)
+	}
+	p, err := hs.lps.LoadProfile(ctx, MigratedProfileRecordID)
+	if err != nil {
+		t.Fatalf("LoadProfile: %v", err)
+	}
+	if p.CreatedVia != "" {
+		t.Errorf("created_via: got %q, want empty string (no env vars on fresh install)", p.CreatedVia)
+	}
+}
+
+func TestIntegration_MigrateToProfiles_LegacyRowMigration_SetsCreatedViaLegacyMigration(t *testing.T) {
+	hs := newHelperStores(t, "test-key", false)
+	ctx := context.Background()
+	// Seed a legacy ca_llm_config:default row to simulate an existing install.
+	if err := hs.lcs.SaveLLMConfig(ctx, &LLMConfigRecord{
+		Provider:     "openai",
+		SummaryModel: "gpt-4o",
+	}); err != nil {
+		t.Fatalf("seed legacy: %v", err)
+	}
+	// env vars don't matter for legacy migration path; use empty.
+	if err := MigrateToProfiles(ctx, hs.surreal, hs.lcs, hs.lps, hs.cipher, false, config.LLMConfig{}); err != nil {
+		t.Fatalf("MigrateToProfiles: %v", err)
+	}
+	p, err := hs.lps.LoadProfile(ctx, MigratedProfileRecordID)
+	if err != nil {
+		t.Fatalf("LoadProfile: %v", err)
+	}
+	if p.CreatedVia != "legacy_migration" {
+		t.Errorf("created_via: got %q, want %q", p.CreatedVia, "legacy_migration")
+	}
+}
+
+func TestIntegration_CreateProfile_LeavesCreatedViaEmpty(t *testing.T) {
+	hs := newHelperStores(t, "test-key", false)
+	ctx := context.Background()
+	// Admin-UI-created profile via CreateProfile should leave created_via empty.
+	id, err := hs.lps.CreateProfile(ctx, ProfileCreate{
+		Name:     "ManualProfile",
+		Provider: "anthropic",
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	p, err := hs.lps.LoadProfile(ctx, id)
+	if err != nil {
+		t.Fatalf("LoadProfile: %v", err)
+	}
+	if p.CreatedVia != "" {
+		t.Errorf("created_via: got %q, want empty string (admin-UI-created profiles are not env-seeded)", p.CreatedVia)
+	}
+}

@@ -104,6 +104,11 @@ type ProfileResponse struct {
 	// MaxConcurrentCalls is the operator-declared upstream parallelism.
 	// null = unknown (orchestrator does not clamp); 0 = unbounded; 1..256 = clamp.
 	MaxConcurrentCalls *int `json:"max_concurrent_calls"`
+	// CreatedVia records how the profile was created:
+	//   "env_bootstrap"     — seeded at startup from SOURCEBRIDGE_LLM_* env vars
+	//   "legacy_migration"  — migrated from a ca_llm_config:default row
+	//   ""                  — created via admin UI (schema default; omitted from wire)
+	CreatedVia string `json:"created_via,omitempty"`
 }
 
 // ProfileCreateRequest is the wire shape for POST. APIKey is plaintext;

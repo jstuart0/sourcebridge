@@ -770,6 +770,41 @@ export default function AdminLLMPage() {
         return null;
       })()}
 
+      {/* CA-540 / F2 — env-seeded callout.
+          Rendered BELOW the State 1/2/3 banner cluster (Decision 10 — actionable
+          warnings lead the attention hierarchy; this is informational).
+          Gated on: is_active AND created_via === "env_bootstrap" (Decision 12).
+          Both banners may appear simultaneously when the profile is incomplete
+          (ruby L2 co-visible case — State banner above, env callout below). */}
+      {selectedProfile?.is_active && selectedProfile.created_via === "env_bootstrap" && (
+        <Panel
+          className="mb-4 border-[var(--color-info,#3b82f6)]"
+          data-testid="env-seeded-callout"
+          role="status"
+          aria-live="polite"
+        >
+          <p className="text-sm text-[var(--text-primary)]">
+            <span className="font-medium">
+              Active profile auto-configured at startup from environment variables.
+            </span>
+          </p>
+          <p className="mt-1 text-sm text-[var(--text-primary)]">
+            Model:{" "}
+            <code className="rounded bg-[var(--bg-subtle)] px-1 font-mono text-xs">
+              {selectedProfile.ask_model || selectedProfile.summary_model || "(unset)"}
+            </code>
+          </p>
+          {selectedProfile.api_key_hint && (
+            <p className="mt-1 text-sm text-[var(--text-primary)]">
+              Key fingerprint:{" "}
+              <code className="rounded bg-[var(--bg-subtle)] px-1 font-mono text-xs">
+                {selectedProfile.api_key_hint}
+              </code>
+            </p>
+          )}
+        </Panel>
+      )}
+
       {/* Editor — always present unless we hit empty-state. In N=1 mode
           this looks exactly like today's /admin/llm grid. In N>=2 mode
           it picks up the "Profile name" + "Make active" affordances. */}

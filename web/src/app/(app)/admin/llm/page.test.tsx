@@ -60,6 +60,7 @@ interface ProfileFixture {
   timeout_secs: number;
   advanced_mode: boolean;
   is_active: boolean;
+  created_via?: string;
 }
 
 function profile(overrides: Partial<ProfileFixture>): ProfileFixture {
@@ -72,7 +73,7 @@ function profile(overrides: Partial<ProfileFixture>): ProfileFixture {
     api_key_hint: overrides.api_key_hint,
     summary_model: overrides.summary_model ?? "qwen2.5:32b",
     review_model: overrides.review_model ?? "",
-    ask_model: overrides.ask_model ?? "",
+    ask_model: overrides.ask_model ?? "qwen2.5:32b",
     knowledge_model: overrides.knowledge_model ?? "",
     architecture_diagram_model: overrides.architecture_diagram_model ?? "",
     report_model: overrides.report_model,
@@ -80,6 +81,7 @@ function profile(overrides: Partial<ProfileFixture>): ProfileFixture {
     timeout_secs: overrides.timeout_secs ?? 900,
     advanced_mode: overrides.advanced_mode ?? false,
     is_active: overrides.is_active ?? false,
+    created_via: overrides.created_via,
   };
 }
 
@@ -846,5 +848,243 @@ describe("AdminLLMPage — Phase 3: onboarding banner (r1 H6)", () => {
     expect(screen.getByTestId("onboarding-banner-state3").textContent).toMatch(
       /Almost there — set a model name below/,
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// CA-540 / F2 — env-seeded callout (created_via = "env_bootstrap")
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("AdminLLMPage — env-seeded callout (CA-540)", () => {
+  it("renders the env-seeded callout when active profile has created_via=env_bootstrap", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            is_active: true,
+            provider: "anthropic",
+            api_key_set: true,
+            api_key_hint: "sk-t...XXXX",
+            ask_model: "claude-sonnet-4",
+            created_via: "env_bootstrap",
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+
+    render(<AdminLLMPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("env-seeded-callout")).toBeInTheDocument();
+    });
+
+    const callout = screen.getByTestId("env-seeded-callout");
+    expect(callout.textContent).toMatch(/Active profile auto-configured at startup from environment variables/);
+    // ask_model shown first (ruby M2)
+    expect(callout.textContent).toMatch(/claude-sonnet-4/);
+    // Key fingerprint shown when api_key_hint is present
+    expect(callout.textContent).toMatch(/sk-t\.\.\.XXXX/);
+  });
+
+  it("does NOT render the callout when is_active=false (even with env_bootstrap)", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            id: "ca_llm_profile:env-seeded",
+            is_active: false,
+            provider: "anthropic",
+            api_key_set: true,
+            created_via: "env_bootstrap",
+          }),
+          profile({
+            id: "ca_llm_profile:other",
+            is_active: true,
+            provider: "ollama",
+            created_via: "",
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+
+    render(<AdminLLMPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("editor-panel-multi")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("env-seeded-callout")).toBeNull();
+  });
+
+  it("does NOT render the callout when created_via=legacy_migration (even if active)", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            is_active: true,
+            provider: "anthropic",
+            api_key_set: true,
+            created_via: "legacy_migration",
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+
+    render(<AdminLLMPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("editor-panel-single")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("env-seeded-callout")).toBeNull();
+  });
+
+  it("does NOT render the callout when created_via is empty (admin-UI-created, active)", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            is_active: true,
+            provider: "anthropic",
+            api_key_set: true,
+            created_via: "",
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+
+    render(<AdminLLMPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("editor-panel-single")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("env-seeded-callout")).toBeNull();
+  });
+
+  it("omits Key fingerprint line when api_key_hint is absent (Ollama case)", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            is_active: true,
+            provider: "ollama",
+            api_key_set: false,
+            api_key_hint: undefined,
+            ask_model: "qwen2.5:32b",
+            created_via: "env_bootstrap",
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+
+    render(<AdminLLMPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("env-seeded-callout")).toBeInTheDocument();
+    });
+
+    const callout = screen.getByTestId("env-seeded-callout");
+    expect(callout.textContent).not.toMatch(/Key fingerprint/);
+    expect(callout.textContent).toMatch(/qwen2\.5:32b/);
+  });
+
+  it("falls back to summary_model when ask_model is empty (ruby M2)", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            is_active: true,
+            provider: "ollama",
+            ask_model: "",
+            summary_model: "fallback-model",
+            created_via: "env_bootstrap",
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+
+    render(<AdminLLMPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("env-seeded-callout")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("env-seeded-callout").textContent).toMatch(/fallback-model/);
+  });
+
+  it("shows (unset) when both ask_model and summary_model are empty", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            is_active: true,
+            provider: "ollama",
+            ask_model: "",
+            summary_model: "",
+            created_via: "env_bootstrap",
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+
+    render(<AdminLLMPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("env-seeded-callout")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("env-seeded-callout").textContent).toMatch(/\(unset\)/);
+  });
+
+  // ruby L2 — co-visible banner test: env-seeded profile that's also incomplete
+  // (created_via=env_bootstrap but no provider set) → both State 2 banner AND
+  // env-seeded callout visible, with State 2 banner appearing BEFORE in DOM order.
+  it("co-visible: State 2 banner appears ABOVE env-seeded callout when profile is env-seeded and incomplete (ruby L2)", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            is_active: true,
+            provider: "",
+            api_key_set: false,
+            created_via: "env_bootstrap",
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+
+    render(<AdminLLMPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("onboarding-banner-state2")).toBeInTheDocument();
+    });
+
+    // Both should be in the DOM.
+    expect(screen.getByTestId("env-seeded-callout")).toBeInTheDocument();
+
+    // DOM order: State 2 banner ABOVE env-seeded callout (Decision 10).
+    const all = document.querySelectorAll(
+      "[data-testid='onboarding-banner-state2'], [data-testid='env-seeded-callout']"
+    );
+    expect(all.length).toBe(2);
+    expect(all[0].getAttribute("data-testid")).toBe("onboarding-banner-state2");
+    expect(all[1].getAttribute("data-testid")).toBe("env-seeded-callout");
   });
 });
