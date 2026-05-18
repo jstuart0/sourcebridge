@@ -581,7 +581,7 @@ export default function ComprehensionSettingsPage() {
                 <select
                   value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
-                  className="w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)]"
+                  className="w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline focus:outline-2 focus:outline-[var(--accent-primary)] focus:outline-offset-2"
                 >
                   <option value="">— Use configured provider default —</option>
                   {models
@@ -769,7 +769,7 @@ export default function ComprehensionSettingsPage() {
                 placeholder="Repository ID (corpus ID)"
                 value={rebuildCorpusId}
                 onChange={(e) => setRebuildCorpusId(e.target.value)}
-                className="flex-1 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)]"
+                className="flex-1 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline focus:outline-2 focus:outline-[var(--accent-primary)] focus:outline-offset-2"
               />
               <Button
                 variant="secondary"
@@ -814,7 +814,7 @@ export default function ComprehensionSettingsPage() {
                         max={20}
                         value={maxConcurrency}
                         onChange={(e) => setMaxConcurrency(Number(e.target.value))}
-                        className="w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)]"
+                        className="w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline focus:outline-2 focus:outline-[var(--accent-primary)] focus:outline-offset-2"
                       />
                       {concurrencyRecommendation &&
                         concurrencyRecommendation.value !== maxConcurrency && (
@@ -862,7 +862,7 @@ export default function ComprehensionSettingsPage() {
                       step={1000}
                       value={maxPromptTokens}
                       onChange={(e) => setMaxPromptTokens(Number(e.target.value))}
-                      className="w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)]"
+                      className="w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline focus:outline-2 focus:outline-[var(--accent-primary)] focus:outline-offset-2"
                     />
                     <p className="mt-1 text-xs text-[var(--text-muted)]">
                       Budget guard ceiling per call.
@@ -888,7 +888,7 @@ export default function ComprehensionSettingsPage() {
                       step={500}
                       value={leafBudgetTokens}
                       onChange={(e) => setLeafBudgetTokens(Number(e.target.value))}
-                      className="w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)]"
+                      className="w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline focus:outline-2 focus:outline-[var(--accent-primary)] focus:outline-offset-2"
                     />
                     <p className="mt-1 text-xs text-[var(--text-muted)]">
                       Max tokens per hierarchical leaf node.

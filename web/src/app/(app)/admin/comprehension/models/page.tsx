@@ -225,7 +225,7 @@ export default function ModelsPage() {
   };
 
   const inputClass =
-    "w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)]";
+    "w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline focus:outline-2 focus:outline-[var(--accent-primary)] focus:outline-offset-2";
   const selectClass = inputClass;
 
   function renderEditableRow(model: ModelCapability, form: Partial<ModelCapability>, setForm: (f: Partial<ModelCapability>) => void) {

@@ -127,8 +127,9 @@ export default function SearchPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search symbols, requirements, files…"
+            aria-label="Search symbols, requirements, and files"
             autoFocus
-            className="h-12 w-full rounded-[var(--panel-radius)] border border-[var(--border-default)] bg-[var(--panel-bg)] pl-11 pr-4 text-base text-[var(--text-primary)] shadow-[var(--panel-shadow-soft)] sm:h-13"
+            className="h-12 w-full rounded-[var(--panel-radius)] border border-[var(--border-default)] bg-[var(--panel-bg)] pl-11 pr-4 text-base text-[var(--text-primary)] shadow-[var(--panel-shadow-soft)] focus:outline focus:outline-2 focus:outline-[var(--accent-primary)] focus:outline-offset-2 sm:h-13"
           />
         </div>
 
