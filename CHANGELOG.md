@@ -4,6 +4,19 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.2-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.15.1-rc.3...v0.15.2-rc.3) (2026-05-18)
+
+
+### Fixed
+
+* **ci,web:** unused import + golangci v2 errcheck/staticcheck noise (CI recovery) ([1d699dc](https://github.com/sourcebridge-ai/sourcebridge/commit/1d699dc9887150bdc8c9a54f26d327ad4f5973a2))
+* **ci,workflows:** golangci v2 config migration + oss-release pull-rebase ordering (codex r2) ([4ad027d](https://github.com/sourcebridge-ai/sourcebridge/commit/4ad027dc77ae9ff17745d21f12a8075860aad417))
+
+
+### Documentation
+
+* **CHANGELOG,CLAUDE.md:** document 2026-05-17 r2 audit remediation campaign (CA-523..CA-536) ([2c4cd1b](https://github.com/sourcebridge-ai/sourcebridge/commit/2c4cd1b9e3d93c4199bc59384367457889be53bf))
+
 ## [Unreleased]
 
 
