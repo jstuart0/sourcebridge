@@ -22,6 +22,19 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Fixed
 
+* **web,docs,infra:** three first-install rough edges closed — CSP dev `unsafe-eval` gate, `/setup` 404 redirect, AI key env-var wiring + cloud-provider doc correction (CA-537, CA-538, CA-539) ([17a386c9](https://github.com/sourcebridge-ai/sourcebridge/commit/17a386c9))
+
+  * **CA-537** (`web/next.config.ts`): `script-src` now includes `'unsafe-eval'` when `NODE_ENV === "development"` only. Webpack HMR uses `eval()`; Chrome blocked the entire dev page without it. Production CSP is byte-identical to pre-fix. `csp.test.ts` adds a `NODE_ENV=test` regression assertion that `'unsafe-eval'` is absent.
+
+  * **CA-538** (`web/next.config.ts`): `GET /setup` 307-redirects to `/login`. The setup form already lives at `/login` (renders based on `GET /auth/info` returning `setup_done: false`); the path just returned 404 before. `permanent: false` so a future dedicated `/setup` route can take the URL without a cached 308. `csp.test.ts` asserts the redirect entry exists with `permanent: false`.
+
+  * **CA-539** (`Makefile`, `docs/installation.md`, `README.md`): `dev-go` and `dev-worker` Makefile targets now bridge `ANTHROPIC_API_KEY` → `SOURCEBRIDGE_LLM_API_KEY` / `SOURCEBRIDGE_WORKER_LLM_API_KEY` when the canonical vars are unset (canonical always wins). Cloud-provider rows in `docs/installation.md` (Anthropic, OpenAI) and `README.md` (Anthropic, OpenAI, Google Gemini, OpenRouter) corrected to show the canonical `SOURCEBRIDGE_WORKER_LLM_API_KEY`; only the Anthropic row carries the Makefile-bridge parenthetical.
+
+  **Follow-ups** (not in this fix; separate tickets):
+  - `/repositories` empty-state should surface a CTA to `/admin/llm` when no LLM profile is active (ruby HIGH — CA-540 or equivalent)
+  - `/admin/llm` should show a callout when a profile was auto-configured from the env seed (ruby MEDIUM)
+  - `setup.sh` existence is confirmed at repo root; no action needed unless a future audit finds it missing (bob L2)
+
 * **ci:** golangci-lint v2 config migration + oss-release pull-rebase ordering before edits (CA-536, codex r2) ([4ad027dc](https://github.com/sourcebridge-ai/sourcebridge/commit/4ad027dc))
 * **web:** explicit focus-ring on 6 admin/comprehension inputs + search page input (CA-523, CA-524) ([7b0e691a](https://github.com/sourcebridge-ai/sourcebridge/commit/7b0e691a))
 * **web:** profile-name-pill focus ring corrected — ring-2 + `--accent-focus` token (CA-533) ([eb0bb6cf](https://github.com/sourcebridge-ai/sourcebridge/commit/eb0bb6cf))
