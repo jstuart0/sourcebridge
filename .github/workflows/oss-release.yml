@@ -270,13 +270,16 @@ jobs:
 
       - name: Commit and push
         run: |
+          # CA-530: rebase onto current main BEFORE staging edits to avoid a
+          # dirty-index error ("cannot pull with rebase: Your index contains
+          # uncommitted changes") if another commit landed between checkout and
+          # now.
+          git fetch origin main
+          git pull --rebase origin main
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add deploy/helm/sourcebridge/Chart.yaml README.md
           git diff --cached --quiet && echo "Chart.yaml and README already at target version — skipping commit" && exit 0
-          # CA-530: rebase onto current main before pushing to avoid a push
-          # race when another commit lands between checkout and push.
-          git pull --rebase origin main
           git commit -m "chore(helm,docs): bump Chart.yaml and README to ${{ github.ref_name }} [skip ci]"
           git push origin main
 
