@@ -95,8 +95,21 @@ services:
   sourcebridge:
     image: sourcebridge/sourcebridge-api:latest
     ports:
-      - "${SOURCEBRIDGE_API_PORT:-8080}:8080"
+      # Host port defaults to 8280 (8080 is commonly taken by SSH tunnels,
+      # other dev servers, and proxies). Override via SOURCEBRIDGE_API_PORT
+      # in .env if 8280 collides too.
+      - "${SOURCEBRIDGE_API_PORT:-8280}:8080"
     environment:
+      # CA-538 / CA-540: env-seeded LLM defaults. These allow first-boot profile
+      # seeding (MigrateToProfiles) to pick up provider/key/model from .env and
+      # surface the "configured via environment" callout in admin/llm.
+      # SOURCEBRIDGE_LLM_MODEL is the user-facing generic alias; the API resolves
+      # it to both summary_model and ask_model so all operation groups are covered.
+      - SOURCEBRIDGE_LLM_PROVIDER=${SOURCEBRIDGE_LLM_PROVIDER:-}
+      - SOURCEBRIDGE_LLM_BASE_URL=${SOURCEBRIDGE_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      - SOURCEBRIDGE_LLM_API_KEY=${SOURCEBRIDGE_LLM_API_KEY:-}
+      - SOURCEBRIDGE_LLM_SUMMARY_MODEL=${SOURCEBRIDGE_LLM_MODEL:-${SOURCEBRIDGE_LLM_SUMMARY_MODEL:-}}
+      - SOURCEBRIDGE_LLM_ASK_MODEL=${SOURCEBRIDGE_LLM_MODEL:-${SOURCEBRIDGE_LLM_ASK_MODEL:-}}
       - SOURCEBRIDGE_STORAGE_SURREAL_MODE=external
       - SOURCEBRIDGE_STORAGE_SURREAL_URL=ws://surrealdb:8000/rpc
       - SOURCEBRIDGE_STORAGE_SURREAL_NAMESPACE=sourcebridge

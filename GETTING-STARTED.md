@@ -89,7 +89,7 @@ Wait ~15 seconds for the services to become healthy:
 
 ```bash
 docker compose -f docker-compose.hub.yml ps
-curl http://localhost:8080/healthz
+curl http://localhost:8280/healthz
 ```
 
 ## Step 5: Create your admin account
