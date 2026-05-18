@@ -4,6 +4,29 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+
+### Fixed
+
+* **ci:** golangci-lint v2 config migration + oss-release pull-rebase ordering before edits (CA-536, codex r2) ([4ad027dc](https://github.com/sourcebridge-ai/sourcebridge/commit/4ad027dc))
+* **web:** explicit focus-ring on 6 admin/comprehension inputs + search page input (CA-523, CA-524) ([7b0e691a](https://github.com/sourcebridge-ai/sourcebridge/commit/7b0e691a))
+* **web:** profile-name-pill focus ring corrected — ring-2 + `--accent-focus` token (CA-533) ([eb0bb6cf](https://github.com/sourcebridge-ai/sourcebridge/commit/eb0bb6cf))
+* **web:** symbols-tab + chat inputs get aria-labels; TraceabilityMatrix confidence dot gains `role="img"` + `aria-label`; 6 decorative dots get `aria-hidden="true"` (CA-526, CA-531, CA-532) ([6e8fb9f2](https://github.com/sourcebridge-ai/sourcebridge/commit/6e8fb9f2))
+
+
+### Changed
+
+* **ci:** bump 16 GHA actions to Node 24-compatible majors ahead of June 2, 2026 force-migration; golangci-lint tool v1.64.8 → v2.12.2 (CA-536) ([91738bf4](https://github.com/sourcebridge-ai/sourcebridge/commit/91738bf4))
+* **web:** define `--color-error`, `--color-accent`, `--color-primary`, `--color-info` token aliases in both theme blocks in `tokens.css` — closes ~55 undefined-token sites (CA-525) ([eb0bb6cf](https://github.com/sourcebridge-ai/sourcebridge/commit/eb0bb6cf))
+* **infra,docs:** kustomize README version example bumped to v0.15.1-rc.3; `oss-release.yml` extended to auto-bump README on tagged release; 2 CLAUDE.md test-name drift fixes; 3 stale TODO comments in `concurrency.py` resolved (CA-527, CA-528, CA-529, CA-530) ([27620612](https://github.com/sourcebridge-ai/sourcebridge/commit/27620612))
+
+
+### Tests
+
+* **web:** ThemeToggle SSR placeholder path covered via `vi.mock("react", ...)` factory; login page tests cover both `setup_done` modes; web test count 350 → 358 (CA-534, CA-535) ([31fe561b](https://github.com/sourcebridge-ai/sourcebridge/commit/31fe561b))
+
+
 ## [0.15.1-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.15.0-rc.3...v0.15.1-rc.3) (2026-05-17)
 
 
