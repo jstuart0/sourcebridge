@@ -43,6 +43,33 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # F7: wait for SurrealDB to accept connections before the API starts.
+      # docker-compose.hub.yml gates on depends_on.surrealdb.condition:service_healthy;
+      # the helm chart equivalent is an initContainer that polls nc -z until ready.
+      # Without this, the API crash-loops 3-5× against "connection refused" during
+      # SurrealDB StatefulSet startup, producing a panic-inducing CrashLoopBackOff
+      # on every fresh helm install even though the install recovers in ~90s.
+      {{- if .Values.surrealdb.enabled }}
+      initContainers:
+        - name: wait-for-surrealdb
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for SurrealDB at {{ include "sourcebridge.fullname" . }}-surrealdb:{{ .Values.surrealdb.port }}..."
+              until nc -z {{ include "sourcebridge.fullname" . }}-surrealdb {{ .Values.surrealdb.port }}; do
+                echo "SurrealDB not ready, retrying in 2s..."
+                sleep 2
+              done
+              echo "SurrealDB is ready."
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+      {{- end }}
       containers:
         - name: api
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
@@ -95,6 +122,33 @@ spec:
             # internalPort without this would silently break preStop.
             - name: SOURCEBRIDGE_INTERNAL_LISTEN_ADDR
               value: "127.0.0.1:{{ .Values.api.internalPort | default 8081 }}"
+            # F8: LLM env vars must reach the API so the env-bootstrap migration
+            # (llm_config_migration.go) can fire on first boot and the admin UI
+            # callout works. Compose (docker-compose.hub.yml) was already fixed;
+            # this wires helm to parity. Worker sees these via SOURCEBRIDGE_WORKER_*;
+            # API uses the non-prefixed SOURCEBRIDGE_LLM_* equivalents.
+            - name: SOURCEBRIDGE_LLM_PROVIDER
+              value: {{ .Values.llm.provider | quote }}
+            - name: SOURCEBRIDGE_LLM_BASE_URL
+              value: {{ .Values.llm.baseUrl | quote }}
+            - name: SOURCEBRIDGE_LLM_SUMMARY_MODEL
+              value: {{ .Values.llm.model | quote }}
+            - name: SOURCEBRIDGE_LLM_ASK_MODEL
+              value: {{ .Values.llm.model | quote }}
+            {{- if .Values.secrets.create }}
+            - name: SOURCEBRIDGE_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sourcebridge.fullname" . }}-secrets
+                  key: llm-api-key
+                  optional: true
+            {{- end }}
+            # F9: repo-cache path must match the volume mount below so the API
+            # can clone repositories. Default ./repo-cache (config.go:854) is
+            # not writable in most container setups. Kustomize pins this at
+            # /data/repo-cache (configmap.yaml:13); helm now matches.
+            - name: SOURCEBRIDGE_STORAGE_REPO_CACHE_PATH
+              value: /data/repo-cache
             {{- range $key, $value := .Values.api.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
@@ -129,32 +183,33 @@ spec:
                     sleep {{ .Values.api.preStopSleepSeconds | default 10 }}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
-          # CA-322: when securityContext.readOnlyRootFilesystem is true,
-          # render emptyDir volume mounts so writable cache paths stay
-          # writable. Without these, the API crashes on first write to
-          # /tmp. Operators that flip readOnlyRootFilesystem=true must
-          # not have to ALSO supply extraVolumes / extraVolumeMounts;
-          # the chart handles the cache paths it knows about.
-          {{- if .Values.securityContext.readOnlyRootFilesystem }}
+          # F9: repo-cache is always mounted regardless of readOnlyRootFilesystem.
+          # The API clones repositories here; without a writable mount indexing
+          # fails silently with status=error on every fresh helm install.
+          # CA-322: /tmp emptyDir is also mounted when readOnlyRootFilesystem=true.
           volumeMounts:
+            - name: repo-cache
+              mountPath: /data/repo-cache
+            {{- if .Values.securityContext.readOnlyRootFilesystem }}
             - name: tmp
               mountPath: /tmp
+            {{- end }}
             {{- with .Values.api.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- else if .Values.api.extraVolumeMounts }}
-          volumeMounts:
-            {{- toYaml .Values.api.extraVolumeMounts | nindent 12 }}
-          {{- end }}
-      {{- if .Values.securityContext.readOnlyRootFilesystem }}
       volumes:
+        # F9: emptyDir for repo clones. Default 5Gi; override via api.repoCacheSizeLimit.
+        # For persistence across pod restarts, use api.repoCachePersistence.enabled=true
+        # (adds a PVC instead of emptyDir — cache rebuilds quickly on re-clone without it).
+        - name: repo-cache
+          emptyDir:
+            sizeLimit: {{ .Values.api.repoCacheSizeLimit | default "5Gi" }}
+        {{- if .Values.securityContext.readOnlyRootFilesystem }}
+        # CA-322: API writes to /tmp at runtime; emptyDir keeps it writable.
         - name: tmp
           emptyDir:
             sizeLimit: {{ .Values.api.tmpSizeLimit | default "1Gi" }}
+        {{- end }}
         {{- with .Values.api.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- else if .Values.api.extraVolumes }}
-      volumes:
-        {{- toYaml .Values.api.extraVolumes | nindent 8 }}
-      {{- end }}

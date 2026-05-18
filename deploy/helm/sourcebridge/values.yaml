@@ -121,9 +121,13 @@ api:
       # can lower this; do not go below 512Mi.
       memory: 2Gi
   # -- Writable emptyDir size limit used when securityContext.readOnlyRootFilesystem=true.
-  # CA-350: /tmp is the API container's only writable path at runtime (the
-  # repo-cache PVC is mounted separately). Default: 1Gi.
+  # CA-350: /tmp writable path at runtime. Default: 1Gi.
   tmpSizeLimit: 1Gi
+  # -- emptyDir size limit for the /data/repo-cache volume (F9).
+  # The API clones git repositories here during indexing. emptyDir is used by
+  # default (no persistence across pod restarts; cache rebuilds quickly on re-clone).
+  # Increase if you index very large repositories or many repositories concurrently.
+  repoCacheSizeLimit: 5Gi
   # -- Extra environment variables (map of NAME: value)
   env: {}
   service:
