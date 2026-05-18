@@ -34,27 +34,38 @@ type repoAccessError struct{ msg string }
 
 func (e *repoAccessError) Error() string { return e.msg }
 
-// askRequest mirrors qa.AskInput on the REST wire. Field names are
-// camelCase to match the GraphQL input shape so callers can use the
-// same payload against either transport.
+// askRequest mirrors qa.AskInput on the REST wire. It accepts both the
+// camelCase form used by the GraphQL transport ("repositoryId") and the
+// snake_case form conventional in REST ("repository_id"). Either key is
+// valid; camelCase takes precedence when both are supplied.
 type askRequest struct {
-	RepositoryID   string   `json:"repositoryId"`
-	Question       string   `json:"question"`
-	Mode           string   `json:"mode,omitempty"`
-	ConversationID string   `json:"conversationId,omitempty"`
-	PriorMessages  []string `json:"priorMessages,omitempty"`
-	FilePath       string   `json:"filePath,omitempty"`
-	Code           string   `json:"code,omitempty"`
-	Language       string   `json:"language,omitempty"`
-	ArtifactID     string   `json:"artifactId,omitempty"`
-	SymbolID       string   `json:"symbolId,omitempty"`
-	RequirementID  string   `json:"requirementId,omitempty"`
-	IncludeDebug   bool     `json:"includeDebug,omitempty"`
+	RepositoryID      string   `json:"repositoryId"`
+	RepositoryIDSnake string   `json:"repository_id,omitempty"`
+	Question          string   `json:"question"`
+	Mode              string   `json:"mode,omitempty"`
+	ConversationID    string   `json:"conversationId,omitempty"`
+	PriorMessages     []string `json:"priorMessages,omitempty"`
+	FilePath          string   `json:"filePath,omitempty"`
+	Code              string   `json:"code,omitempty"`
+	Language          string   `json:"language,omitempty"`
+	ArtifactID        string   `json:"artifactId,omitempty"`
+	SymbolID          string   `json:"symbolId,omitempty"`
+	RequirementID     string   `json:"requirementId,omitempty"`
+	IncludeDebug      bool     `json:"includeDebug,omitempty"`
+}
+
+// resolvedRepositoryID returns the effective repository ID, preferring the
+// camelCase field and falling back to the snake_case alias.
+func (r askRequest) resolvedRepositoryID() string {
+	if r.RepositoryID != "" {
+		return r.RepositoryID
+	}
+	return r.RepositoryIDSnake
 }
 
 func (r askRequest) toAskInput() qa.AskInput {
 	return qa.AskInput{
-		RepositoryID:   r.RepositoryID,
+		RepositoryID:   r.resolvedRepositoryID(),
 		Question:       r.Question,
 		Mode:           qa.Mode(strings.ToLower(r.Mode)),
 		ConversationID: r.ConversationID,
@@ -83,6 +94,13 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := req.toAskInput()
+	// Return 400 when neither repositoryId nor repository_id was supplied so
+	// callers get an actionable error rather than the opaque 403 that would
+	// otherwise fire from the tenant-filter gate on an empty ID.
+	if in.RepositoryID == "" {
+		writeAskJSONErr(w, http.StatusBadRequest, "missing required field: repositoryId (or repository_id)")
+		return
+	}
 	// SEC-5: verify the caller has access to the requested repository before
 	// allowing the QA orchestrator to reason over its indexed content.
 	if err := s.checkRepoAccess(r, in.RepositoryID); err != nil {

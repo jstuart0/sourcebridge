@@ -66,9 +66,9 @@ func TestHandleAsk_BadJSON(t *testing.T) {
 	}
 }
 
-// TestHandleAsk_MissingRepo verifies that an empty repositoryId is rejected.
-// The checkRepoAccess guard fires before the orchestrator, so the response is
-// 403 (forbidden / no access) rather than 400 (bad input).
+// TestHandleAsk_MissingRepo verifies that omitting both repositoryId and
+// repository_id returns 400 with an actionable message. Previously this
+// fell through to the tenant-filter gate and returned a misleading 403.
 func TestHandleAsk_MissingRepo(t *testing.T) {
 	orch := qa.New(&stubSynth{available: true}, nil, nil, qa.DefaultConfig())
 	s := newAskTestServer(t, true, orch, graphstore.NewStore())
@@ -76,8 +76,80 @@ func TestHandleAsk_MissingRepo(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ask", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	s.handleAsk(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("code = %d, want 403 (empty repositoryId blocked by repo-access check)", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("code = %d, want 400 (empty repositoryId returns bad-request, not forbidden)", rec.Code)
+	}
+}
+
+// TestHandleAsk_SnakeCaseRepositoryID verifies that the snake_case alias
+// repository_id is accepted and resolves correctly. REST clients using the
+// conventional Go/REST naming convention should not need to use camelCase.
+func TestHandleAsk_SnakeCaseRepositoryID(t *testing.T) {
+	synth := &stubSynth{
+		available: true,
+		resp: &reasoningv1.AnswerQuestionResponse{
+			Answer: "snake works",
+			Usage:  &commonv1.LLMUsage{Model: "m", InputTokens: 1, OutputTokens: 1},
+		},
+	}
+	orch := qa.New(synth, nil, nil, qa.DefaultConfig())
+
+	store := graphstore.NewStore()
+	repo, err := store.CreateRepository(t.Context(), "snake-repo", "/src/snake-repo")
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	s := newAskTestServer(t, true, orch, store)
+
+	// Use raw JSON with snake_case key — cannot use askRequest struct here
+	// because it would marshal to camelCase.
+	body := []byte(`{"repository_id":"` + repo.ID + `","question":"does snake work?"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ask", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.handleAsk(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("snake_case repository_id: code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var out qa.AskResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.Answer != "snake works" {
+		t.Errorf("answer = %q, want %q", out.Answer, "snake works")
+	}
+}
+
+// TestHandleAsk_CamelTakesPrecedenceOverSnake verifies that when both
+// repositoryId and repository_id are present, camelCase wins.
+func TestHandleAsk_CamelTakesPrecedenceOverSnake(t *testing.T) {
+	synth := &stubSynth{
+		available: true,
+		resp: &reasoningv1.AnswerQuestionResponse{
+			Answer: "camel wins",
+			Usage:  &commonv1.LLMUsage{Model: "m", InputTokens: 1, OutputTokens: 1},
+		},
+	}
+	orch := qa.New(synth, nil, nil, qa.DefaultConfig())
+
+	store := graphstore.NewStore()
+	repo, err := store.CreateRepository(t.Context(), "camel-repo", "/src/camel-repo")
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	s := newAskTestServer(t, true, orch, store)
+
+	// Supply camelCase with a valid ID and snake_case with a bogus ID.
+	// The handler should use the camelCase value (resolving to the real repo).
+	body := []byte(`{"repositoryId":"` + repo.ID + `","repository_id":"bogus-id","question":"q"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ask", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.handleAsk(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("camel-over-snake precedence: code = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }
 
