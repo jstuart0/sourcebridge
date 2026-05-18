@@ -30,6 +30,13 @@ const nextConfig: NextConfig = {
     // middleware.ts, pass it to Next.js via the `nonce` prop, add it to CSP headers).
     // That refactor is a separate 1.0 ticket — tracking as CA-337.
     //
+    // CA-537: 'unsafe-eval' is added to script-src in dev mode only. Webpack HMR
+    // (hot module replacement) uses eval() to inject updated modules at runtime;
+    // without this token Chrome blocks the entire page when running `next dev`.
+    // Production CSP is byte-identical — NODE_ENV is never "development" in a
+    // production build or `next start` run. The same isDev gate already controls
+    // the dev-only WebSocket origins in connect-src (CA-338 below).
+    //
     // CA-338: restrict wss:/ws: in connect-src to same-origin instead of allowing
     // the entire wss: / ws: scheme globally. In production, WebSocket connections
     // are same-origin. In dev, Next.js HMR uses ws://localhost:<port>; we allow
@@ -42,7 +49,7 @@ const nextConfig: NextConfig = {
     const wsOrigins = isDev ? `ws://localhost:* wss://localhost:*` : ``;
     const cspDirectives = [
       `default-src 'self'`,
-      `script-src 'self' 'unsafe-inline'`,
+      `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`, // CA-537: unsafe-eval dev-only (webpack HMR); absent in production
       `style-src 'self' 'unsafe-inline'`,
       `img-src 'self' data: blob:`,
       // CA-338: pin WebSocket/SSE connections to same-origin (+ localhost in dev).
@@ -78,6 +85,15 @@ const nextConfig: NextConfig = {
         source: "/admin/settings/comprehension/:path*",
         destination: "/admin/comprehension/:path*",
         permanent: true,
+      },
+      {
+        // CA-538: /setup was a 404 — the setup form lives at /login (the
+        // login page renders the first-time setup form when setup_done=false).
+        // Use 307 (permanent: false) so browsers never cache this redirect;
+        // a future dedicated /setup route can override by removing this entry.
+        source: "/setup",
+        destination: "/login",
+        permanent: false,
       },
     ];
   },

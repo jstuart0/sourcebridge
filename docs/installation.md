@@ -666,8 +666,8 @@ grpc_auth_secret = ""             # shared secret for API <-> worker
 
 | Provider | `provider` value | `base_url` | `api_key` | Notes |
 |---|---|---|---|---|
-| Anthropic | `anthropic` | (leave empty) | `ANTHROPIC_API_KEY` | Claude models via cloud API |
-| OpenAI | `openai` | (leave empty) | `OPENAI_API_KEY` | GPT models via cloud API |
+| Anthropic | `anthropic` | (leave empty) | `SOURCEBRIDGE_WORKER_LLM_API_KEY` (Makefile dev targets also accept `ANTHROPIC_API_KEY`) | Claude models via cloud API |
+| OpenAI | `openai` | (leave empty) | `SOURCEBRIDGE_WORKER_LLM_API_KEY` | GPT models via cloud API |
 | Ollama | `ollama` | `http://localhost:11434/v1` | `not-needed` | Local inference, no API key |
 | vLLM | `vllm` | `http://localhost:8000/v1` | `not-needed` | Local GPU-accelerated inference |
 | Any OpenAI-compatible | `openai` | Custom endpoint URL | As required | Works with LiteLLM, LocalAI, etc. |

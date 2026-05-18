@@ -168,6 +168,10 @@ docker-down:
 dev: dev-go
 
 dev-go: build-go
+	# CA-539: bridge ANTHROPIC_API_KEY → SOURCEBRIDGE_LLM_API_KEY so the
+	# MigrateToProfiles boot seeder picks it up on first run. The canonical
+	# var always wins; this is a no-op when SOURCEBRIDGE_LLM_API_KEY is set.
+	SOURCEBRIDGE_LLM_API_KEY="$${SOURCEBRIDGE_LLM_API_KEY:-$$ANTHROPIC_API_KEY}" \
 	./$(GO_BIN) serve
 
 dev-web:
@@ -191,9 +195,13 @@ dev-web:
 # fall back to importlib.metadata and report the pyproject.toml version
 # (0.1.0), causing local Go/worker version drift.
 dev-worker:
+	# CA-539: bridge ANTHROPIC_API_KEY → SOURCEBRIDGE_WORKER_LLM_API_KEY so
+	# users who have ANTHROPIC_API_KEY set don't need to know the SourceBridge
+	# canonical name. The canonical var always wins (shell default expansion).
 	SOURCEBRIDGE_VERSION="$(VERSION)" \
 	SOURCEBRIDGE_COMMIT="$(COMMIT)" \
 	SOURCEBRIDGE_BUILD_DATE="$(BUILD_DATE)" \
+	SOURCEBRIDGE_WORKER_LLM_API_KEY="$${SOURCEBRIDGE_WORKER_LLM_API_KEY:-$$ANTHROPIC_API_KEY}" \
 	uv run --project workers python -m workers
 
 # Clean

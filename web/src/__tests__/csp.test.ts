@@ -33,6 +33,28 @@ describe("Content-Security-Policy header contract", () => {
     expect(connectSrc).not.toMatch(/\bws:\s/);
     expect(connectSrc).not.toMatch(/\bwss:$/);
     expect(connectSrc).not.toMatch(/\bws:$/);
+    // CA-537: dev-only 'unsafe-eval' token must NOT appear when NODE_ENV=test.
+    // Vitest sets NODE_ENV=test (not "development"), so the isDev gate is false
+    // and the production-shape CSP must apply without the eval() permission.
+    const scriptSrc = csp
+      ?.split(";")
+      .map((d) => d.trim())
+      .find((d) => d.startsWith("script-src"));
+    expect(scriptSrc).toBeDefined();
+    expect(scriptSrc).not.toContain("'unsafe-eval'");
+  });
+
+  it("redirects /setup to /login (CA-538)", async () => {
+    if (typeof config.redirects !== "function") {
+      throw new Error("next.config.ts must export a redirects() function");
+    }
+    const result = await config.redirects();
+    const entry = result.find((r) => r.source === "/setup");
+    expect(entry).toBeDefined();
+    expect(entry?.destination).toBe("/login");
+    // permanent: false → 307 (not 308). A future dedicated /setup route
+    // must be able to override; permanent caching would prevent that.
+    expect(entry?.permanent).toBe(false);
   });
 
   it("sets X-Content-Type-Options and Referrer-Policy", async () => {

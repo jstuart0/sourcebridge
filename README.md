@@ -71,7 +71,7 @@ curl -O https://raw.githubusercontent.com/sourcebridge-ai/sourcebridge/main/dock
 docker compose -f docker-compose.hub.yml up -d
 ```
 
-Open [http://localhost:3300](http://localhost:3300) and create your admin account.
+Open [http://localhost:3300](http://localhost:3300) (you'll be directed to /login to create your admin account on the first-time setup form).
 
 > **Security: set your secrets before exposing SourceBridge to a network.**
 >
@@ -438,10 +438,10 @@ SourceBridge supports both cloud-hosted and local inference providers. Configure
 
 | Provider | Config Value | API Key Variable | Models |
 |---|---|---|---|
-| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | Claude Sonnet 4, Claude Haiku, etc. |
-| OpenAI | `openai` | `OPENAI_API_KEY` | GPT-4o, GPT-4o-mini, etc. |
-| Google Gemini | `gemini` | `GOOGLE_API_KEY` | Gemini 2.5 Pro, Flash, etc. |
-| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | Any model on OpenRouter |
+| Anthropic | `anthropic` | `SOURCEBRIDGE_WORKER_LLM_API_KEY` (Makefile dev targets also accept `ANTHROPIC_API_KEY`) | Claude Sonnet 4, Claude Haiku, etc. |
+| OpenAI | `openai` | `SOURCEBRIDGE_WORKER_LLM_API_KEY` | GPT-4o, GPT-4o-mini, etc. |
+| Google Gemini | `gemini` | `SOURCEBRIDGE_WORKER_LLM_API_KEY` | Gemini 2.5 Pro, Flash, etc. |
+| OpenRouter | `openrouter` | `SOURCEBRIDGE_WORKER_LLM_API_KEY` | Any model on OpenRouter |
 
 ### Local Inference
 
